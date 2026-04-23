@@ -82,7 +82,7 @@ export class CodexAppServerClient {
   private spawnProcess() {
     if (this.proc && !this.proc.killed) return;
 
-    const codexHome = prepareCodexHome(this.config.codex.codexHomeSource);
+    const codexHome = prepareCodexHome(this.config.providers.codex.homePath);
     const isWindows = process.platform === 'win32';
 
     const env = buildChildEnv(process.env, { CODEX_HOME: codexHome }, [
@@ -90,7 +90,7 @@ export class CodexAppServerClient {
     ]);
 
     this.proc = spawn(
-      this.config.codex.binary,
+      this.config.providers.codex.binary,
       ['app-server', '--listen', 'stdio://'],
       {
         detached: !isWindows,

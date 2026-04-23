@@ -13,11 +13,11 @@ const resolveSource = (source: string): string => {
   return source;
 };
 
-export const prepareCodexHome = (codexHomeSource: string): string => {
+export const prepareCodexHome = (sourceHomePath: string): string => {
   const target = gatewayCodexHome();
   mkdirSync(target, { recursive: true });
 
-  const srcAuth = join(resolveSource(codexHomeSource), 'auth.json');
+  const srcAuth = join(resolveSource(sourceHomePath), 'auth.json');
   const dstAuth = join(target, 'auth.json');
 
   if (existsSync(srcAuth)) {

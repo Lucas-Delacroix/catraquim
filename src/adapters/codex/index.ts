@@ -47,7 +47,7 @@ export class CodexAdapter implements Adapter {
   }
 
   public async status(): Promise<AdapterStatus> {
-    const auth = await getCodexAuthStatus(this.config.codex.codexHomeSource);
+    const auth = await getCodexAuthStatus(this.config.providers.codex.homePath);
 
     return {
       expiresAt: auth.expiresAt,

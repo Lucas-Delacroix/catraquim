@@ -7,9 +7,7 @@
     "catraquim": "./dist/cli.js"
   },
   "main": "./dist/cli.js",
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "engines": {
     "node": ">=20"
   },
@@ -20,13 +18,7 @@
     "start": "tsx src/cli.ts start",
     "test": "vitest run"
   },
-  "keywords": [
-    "openai",
-    "gateway",
-    "hono",
-    "codex",
-    "oauth"
-  ],
+  "keywords": ["openai", "gateway", "hono", "codex", "oauth"],
   "author": "",
   "license": "MIT",
   "packageManager": "pnpm@10.8.1",

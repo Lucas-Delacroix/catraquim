@@ -13,6 +13,7 @@ export const defaultConfig: AppConfig = {
   },
   providers: {
     codex: {
+      type: 'codex',
       binary: 'codex',
       homePath: '~/.codex',
     },

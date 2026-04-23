@@ -4,7 +4,11 @@ import { dirname, join } from 'node:path';
 
 import { AppError } from '../errors.js';
 import { defaultConfig } from './defaults.js';
-import { type AppConfig, appConfigSchema } from './schema.js';
+import {
+  type AppConfig,
+  type ProviderConfig,
+  appConfigSchema,
+} from './schema.js';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -30,18 +34,31 @@ export const normalizeConfigShape = (raw: Record<string, unknown>) => {
     providers.codex = legacyCodex;
   }
 
-  if (isRecord(providers.codex)) {
-    const { codexHomeSource, homePath, ...providerRest } = providers.codex;
+  for (const [providerId, providerValue] of Object.entries(providers)) {
+    if (!isRecord(providerValue)) {
+      continue;
+    }
 
-    providers.codex = {
-      ...providerRest,
-      homePath:
-        typeof homePath === 'string'
-          ? homePath
-          : typeof codexHomeSource === 'string'
-            ? codexHomeSource
-            : undefined,
-    };
+    if (
+      providerId === 'codex' ||
+      providerValue.type === 'codex' ||
+      'binary' in providerValue ||
+      'codexHomeSource' in providerValue
+    ) {
+      const { codexHomeSource, homePath, type, ...providerRest } =
+        providerValue;
+
+      providers[providerId] = {
+        ...providerRest,
+        homePath:
+          typeof homePath === 'string'
+            ? homePath
+            : typeof codexHomeSource === 'string'
+              ? codexHomeSource
+              : undefined,
+        type: type === 'codex' ? type : 'codex',
+      };
+    }
   }
 
   return {
@@ -66,6 +83,37 @@ export const parseConfigJson = (
   }
 };
 
+const mergeProviders = (
+  base: AppConfig['providers'],
+  overrides: Partial<AppConfig>['providers']
+): AppConfig['providers'] => {
+  const merged: AppConfig['providers'] = { ...base };
+
+  for (const [providerId, providerConfig] of Object.entries(overrides ?? {})) {
+    const baseProvider = base[providerId];
+
+    if (
+      isRecord(baseProvider) &&
+      isRecord(providerConfig) &&
+      'type' in baseProvider &&
+      'type' in providerConfig &&
+      baseProvider.type === providerConfig.type
+    ) {
+      merged[providerId] = {
+        ...(baseProvider as ProviderConfig),
+        ...(providerConfig as ProviderConfig),
+      };
+      continue;
+    }
+
+    if (providerConfig) {
+      merged[providerId] = providerConfig as ProviderConfig;
+    }
+  }
+
+  return merged;
+};
+
 export const mergeConfig = (
   base: AppConfig,
   overrides: Partial<AppConfig>
@@ -75,14 +123,7 @@ export const mergeConfig = (
       ...base.models,
       ...overrides.models,
     },
-    providers: {
-      ...base.providers,
-      ...overrides.providers,
-      codex: {
-        ...base.providers.codex,
-        ...overrides.providers?.codex,
-      },
-    },
+    providers: mergeProviders(base.providers, overrides.providers),
     server: {
       ...base.server,
       ...overrides.server,

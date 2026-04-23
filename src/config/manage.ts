@@ -5,6 +5,7 @@ import { createInterface } from 'node:readline/promises';
 import { AppError } from '../errors.js';
 import { defaultConfig } from './defaults.js';
 import { homeConfigPath } from './loader.js';
+import { defaultCodexProvider, findFirstProviderByType } from './providers.js';
 import { type AppConfig, appConfigSchema } from './schema.js';
 import { readEffectiveConfig, writeConfigFile } from './store.js';
 
@@ -196,6 +197,9 @@ export const setupConfig = async ({
   promptApi,
 }: SetupConfigOptions = {}) => {
   const currentConfig = readEffectiveConfig(filePath);
+  const currentProvider =
+    findFirstProviderByType(currentConfig.providers, 'codex') ??
+    defaultCodexProvider();
   const modelEntries = Object.entries(currentConfig.models);
   const firstModel = modelEntries[0] ?? [
     'codex-max',
@@ -219,13 +223,14 @@ export const setupConfig = async ({
         currentConfig.server.token ?? ''
       )
     );
+    const providerId = await prompts.ask('Provider id', currentProvider.id);
     const binary = await prompts.ask(
       'Codex binary',
-      currentConfig.providers.codex.binary
+      currentProvider.config.binary
     );
     const homePath = await prompts.ask(
       'Codex home',
-      currentConfig.providers.codex.homePath
+      currentProvider.config.homePath
     );
     const primaryAlias = await prompts.ask(
       'Primary model alias',
@@ -252,7 +257,7 @@ export const setupConfig = async ({
 
     const models: AppConfig['models'] = {
       [primaryAlias]: {
-        adapter: 'codex',
+        adapter: providerId,
         upstreamModel: primaryUpstream,
       },
     };
@@ -263,7 +268,7 @@ export const setupConfig = async ({
       }
 
       models[secondAlias] = {
-        adapter: 'codex',
+        adapter: providerId,
         upstreamModel: secondUpstream,
       };
     }
@@ -271,7 +276,8 @@ export const setupConfig = async ({
     const nextConfig = appConfigSchema.parse({
       models,
       providers: {
-        codex: {
+        [providerId]: {
+          type: 'codex',
           binary,
           homePath,
         },

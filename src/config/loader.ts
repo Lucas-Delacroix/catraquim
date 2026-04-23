@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import 'dotenv/config';
 
 import { defaultConfig } from './defaults.js';
+import { findFirstProviderByType } from './providers.js';
 import { type AppConfig, appConfigSchema } from './schema.js';
 import { expandHome, mergeConfig, readConfigFile } from './store.js';
 
@@ -58,16 +59,20 @@ const readUserConfig = (): Partial<AppConfig> => {
 
 export const loadConfig = (): AppConfig => {
   const merged = mergeConfig(defaultConfig, readUserConfig());
+  const codexProvider = findFirstProviderByType(merged.providers, 'codex');
 
   const envAdjusted = mergeConfig(merged, {
-    providers: {
-      codex: {
-        binary:
-          readOptionalEnv('CATRAQUIM_CODEX_BINARY') ??
-          merged.providers.codex.binary,
-        homePath: expandHome(merged.providers.codex.homePath),
-      },
-    },
+    providers: codexProvider
+      ? {
+          [codexProvider.id]: {
+            ...codexProvider.config,
+            binary:
+              readOptionalEnv('CATRAQUIM_CODEX_BINARY') ??
+              codexProvider.config.binary,
+            homePath: expandHome(codexProvider.config.homePath),
+          },
+        }
+      : undefined,
     server: {
       host: merged.server.host,
       port: Number(readOptionalEnv('CATRAQUIM_PORT') ?? merged.server.port),

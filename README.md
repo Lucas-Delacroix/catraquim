@@ -1,29 +1,25 @@
 # catraquim
 
-Local daemon to expose LLM CLIs as an OpenAI-compatible API.
+Gateway local que expõe o Codex como API compatível com OpenAI.
 
-## Scaffold atual
+## Requisitos
 
-O projeto já nasce com:
+- Node 20+
+- pnpm
+- `codex` disponível no `PATH`
+- autenticação válida em `~/.codex`
 
-- CLI em `src/cli.ts` com comandos `start` e `auth:status`
-- servidor HTTP em Hono com `GET /healthz`, `GET /auth/status`, `GET /v1/models`
-- loader de configuração com defaults + env + `~/.config/catraquim/config.json`
-- middleware opcional de bearer token
-- contratos das camadas `services`, `adapters`, `credentials` e `sse`
-- stubs do adapter Codex para completar nas próximas etapas
-
-## Rodando em desenvolvimento
+## Rodando
 
 ```bash
 pnpm install
-pnpm dev
+pnpm start
 ```
 
-Ou direto:
+Para desenvolvimento:
 
 ```bash
-pnpm start
+pnpm dev
 ```
 
 ## Comandos
@@ -31,25 +27,55 @@ pnpm start
 ```bash
 catraquim start
 catraquim auth:status
+catraquim config:setup
+```
+
+## Endpoints
+
+```text
+GET  /healthz
+GET  /auth/status
+GET  /v1/models
+POST /v1/chat/completions
+GET  /openapi.json
+GET  /docs
 ```
 
 ## Configuração
 
-Arquivo base:
+Arquivo: `~/.config/catraquim/config.json`
 
 ```json
 {
   "server": { "host": "127.0.0.1", "port": 4141, "token": null },
   "models": {
-    "gpt-5-codex": { "adapter": "codex", "upstreamModel": "gpt-5" },
-    "gpt-5": { "adapter": "codex", "upstreamModel": "gpt-5" }
+    "codex-max": { "adapter": "codex", "upstreamModel": "codex-max" },
+    "codex-mini": { "adapter": "codex", "upstreamModel": "codex-mini" }
   },
-  "codex": { "binary": "codex", "codexHomeSource": "~/.codex" }
+  "providers": {
+    "codex": { "binary": "codex", "homePath": "~/.codex" }
+  }
 }
 ```
 
-Overrides por ambiente:
+`codex-max` e `codex-mini` são aliases do gateway. Se o seu Codex usar outros nomes, troque o `upstreamModel`.
+
+Variáveis de ambiente:
 
 - `CATRAQUIM_PORT`
 - `CATRAQUIM_TOKEN`
 - `CATRAQUIM_CODEX_BINARY`
+
+## Exemplo
+
+```bash
+curl -X POST 'http://127.0.0.1:4141/v1/chat/completions' \
+  -H 'content-type: application/json' \
+  -d '{
+    "model": "codex-max",
+    "stream": false,
+    "messages": [
+      { "role": "user", "content": "Responda com uma frase curta." }
+    ]
+  }'
+```

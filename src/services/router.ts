@@ -1,16 +1,24 @@
 import type { Adapter } from '../adapters/base.js';
+import type { ModelBinding } from '../application/model-registry.js';
 import { AppError } from '../errors.js';
 
 export class ServiceRouter {
-  public constructor(private readonly adapters: Adapter[]) {}
+  private readonly adaptersById: ReadonlyMap<string, Adapter>;
 
-  public resolveAdapter(model: string): Adapter {
-    const adapter = this.adapters.find((candidate) =>
-      candidate.supports(model)
+  public constructor(adapters: Adapter[]) {
+    this.adaptersById = new Map(
+      adapters.map((adapter) => [adapter.id, adapter])
     );
+  }
+
+  public resolveAdapter(binding: ModelBinding): Adapter {
+    const adapter = this.adaptersById.get(binding.providerId);
 
     if (!adapter) {
-      throw new AppError(`No adapter configured for model "${model}"`, 404);
+      throw new AppError(
+        `No provider configured for model "${binding.gatewayModel}"`,
+        404
+      );
     }
 
     return adapter;

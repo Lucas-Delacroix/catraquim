@@ -1,4 +1,4 @@
-import type { ChatCompletionResult } from '../services/chat.js';
+import type { ChatCompletionResult } from '../usecases/complete-chat.js';
 
 export const toOpenAiChatCompletion = (
   model: string,

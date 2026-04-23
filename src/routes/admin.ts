@@ -1,7 +1,7 @@
 import type { OpenAPIHono } from '@hono/zod-openapi';
 
-import type { Adapter } from '../adapters/base.js';
 import type { AppConfig } from '../config/schema.js';
+import type { GetProviderStatusesUseCase } from '../usecases/get-provider-statuses.js';
 import { createApiRoute, jsonErrorResponses, jsonResponse } from './openapi.js';
 import { authStatusResponseSchema, healthzResponseSchema } from './schemas.js';
 
@@ -30,7 +30,7 @@ const authStatusRoute = createApiRoute({
 export const registerAdminRoutes = (
   app: OpenAPIHono,
   config: AppConfig,
-  adapters: Adapter[]
+  getProviderStatuses: GetProviderStatusesUseCase
 ) => {
   app.openapi(healthzRoute, (c) => {
     return c.json({
@@ -43,13 +43,6 @@ export const registerAdminRoutes = (
   });
 
   app.openapi(authStatusRoute, async (c) => {
-    const statuses = await Promise.all(
-      adapters.map(async (adapter) => {
-        const { id: _id, ...status } = await adapter.status();
-        return [adapter.id, status] as const;
-      })
-    );
-
-    return c.json(Object.fromEntries(statuses));
+    return c.json(await getProviderStatuses.execute());
   });
 };

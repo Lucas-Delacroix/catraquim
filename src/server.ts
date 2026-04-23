@@ -5,7 +5,9 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 
 import packageJson from '../package.json';
 import type { Adapter } from './adapters/base.js';
-import { CodexAdapter } from './adapters/codex/index.js';
+import { ModelRegistry } from './application/model-registry.js';
+import { ProviderFactory } from './application/provider-factory.js';
+import { ProviderModelCatalog } from './application/provider-model-catalog.js';
 import { loadConfig, resolvedConfigPaths } from './config/loader.js';
 import type { AppConfig } from './config/schema.js';
 import { AppError, toErrorResponse } from './errors.js';
@@ -14,13 +16,16 @@ import { bearerAuth } from './middleware/auth.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerModelsRoutes } from './routes/models.js';
-import { ChatService } from './services/chat.js';
-import { ServiceRouter } from './services/router.js';
+import { CompleteChatUseCase } from './usecases/complete-chat.js';
+import { GetProviderStatusesUseCase } from './usecases/get-provider-statuses.js';
+import { ListModelsUseCase } from './usecases/list-models.js';
 
 export interface ServerContext {
   adapters: Adapter[];
-  chatService: ChatService;
   config: AppConfig;
+  completeChat: CompleteChatUseCase;
+  getProviderStatuses: GetProviderStatusesUseCase;
+  listModels: ListModelsUseCase;
 }
 
 const closeAdapters = (adapters: Adapter[]) => {
@@ -76,14 +81,19 @@ const registerShutdownHandlers = (server: ServerType, adapters: Adapter[]) => {
 };
 
 export const createServerContext = (config = loadConfig()): ServerContext => {
-  const adapters = [new CodexAdapter(config)];
-  const router = new ServiceRouter(adapters);
-  const chatService = new ChatService(router);
+  const modelRegistry = new ModelRegistry(config.models, config.providers);
+  const providerModelCatalog = new ProviderModelCatalog(config.providers);
+  const adapters = new ProviderFactory().create(config);
+  const completeChat = new CompleteChatUseCase(modelRegistry, adapters);
+  const getProviderStatuses = new GetProviderStatusesUseCase(adapters);
+  const listModels = new ListModelsUseCase(modelRegistry, providerModelCatalog);
 
   return {
     adapters,
-    chatService,
     config,
+    completeChat,
+    getProviderStatuses,
+    listModels,
   };
 };
 
@@ -109,9 +119,9 @@ export const createApp = (context = createServerContext()) => {
   });
 
   app.use('*', bearerAuth(context.config.server.token));
-  registerAdminRoutes(app, context.config, context.adapters);
-  registerModelsRoutes(app, context.config);
-  registerChatRoutes(app, context.config, context.chatService);
+  registerAdminRoutes(app, context.config, context.getProviderStatuses);
+  registerModelsRoutes(app, context.listModels);
+  registerChatRoutes(app, context.completeChat);
 
   app.doc('/openapi.json', {
     info: {

@@ -71,9 +71,11 @@ export const chatCompletionResponseSchema = z
 
 export const modelEntrySchema = z
   .object({
+    canonical_ref: z.string(),
     id: z.string(),
     object: z.literal('model'),
     owned_by: z.string(),
+    source: z.enum(['configured-alias', 'provider-catalog']),
   })
   .openapi('ModelEntry');
 

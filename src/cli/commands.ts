@@ -62,14 +62,7 @@ const getAdapterStatuses = async () => {
   const context = createServerContext();
 
   try {
-    const statuses = await Promise.all(
-      context.adapters.map(async (adapter) => {
-        const { id: _id, ...status } = await adapter.status();
-        return [adapter.id, status] as const;
-      })
-    );
-
-    return Object.fromEntries(statuses);
+    return await context.getProviderStatuses.execute();
   } finally {
     for (const adapter of context.adapters) {
       adapter.shutdown?.();

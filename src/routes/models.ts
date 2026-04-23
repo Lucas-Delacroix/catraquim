@@ -1,6 +1,6 @@
 import type { OpenAPIHono } from '@hono/zod-openapi';
 
-import type { AppConfig } from '../config/schema.js';
+import type { ListModelsUseCase } from '../usecases/list-models.js';
 import { createApiRoute, jsonErrorResponses, jsonResponse } from './openapi.js';
 import { modelsResponseSchema } from './schemas.js';
 
@@ -14,15 +14,14 @@ const modelsRoute = createApiRoute({
   tag: 'Models',
 });
 
-export const registerModelsRoutes = (app: OpenAPIHono, config: AppConfig) => {
+export const registerModelsRoutes = (
+  app: OpenAPIHono,
+  listModels: ListModelsUseCase
+) => {
   app.openapi(modelsRoute, (c) => {
     return c.json({
       object: 'list',
-      data: Object.entries(config.models).map(([id, definition]) => ({
-        id,
-        object: 'model',
-        owned_by: definition.adapter,
-      })),
+      data: listModels.execute(),
     });
   });
 };

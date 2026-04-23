@@ -1,13 +1,12 @@
 import type { OpenAPIHono } from '@hono/zod-openapi';
 
 import type { ChatMessage, ToolDefinition } from '../adapters/base.js';
-import type { AppConfig } from '../config/schema.js';
 import { toErrorResponse } from '../errors.js';
-import type { ChatService } from '../services/chat.js';
 import {
   createNotImplementedStreamPayload,
   toOpenAiChatCompletion,
 } from '../sse/openai-stream.js';
+import type { CompleteChatUseCase } from '../usecases/complete-chat.js';
 import {
   createApiRoute,
   jsonErrorResponses,
@@ -42,8 +41,7 @@ const chatCompletionsRoute = createApiRoute({
 
 export const registerChatRoutes = (
   app: OpenAPIHono,
-  _config: AppConfig,
-  chatService: ChatService
+  completeChat: CompleteChatUseCase
 ) => {
   app.openapi(chatCompletionsRoute, async (c) => {
     const body = c.req.valid('json');
@@ -53,7 +51,7 @@ export const registerChatRoutes = (
         return c.json(createNotImplementedStreamPayload(body.model), 501);
       }
 
-      const result = await chatService.complete(
+      const result = await completeChat.execute(
         {
           maxTokens: body.max_tokens,
           messages: mapMessages(body.messages),

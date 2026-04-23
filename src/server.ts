@@ -6,7 +6,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import packageJson from '../package.json';
 import type { Adapter } from './adapters/base.js';
 import { CodexAdapter } from './adapters/codex/index.js';
-import { loadConfig } from './config/loader.js';
+import { loadConfig, resolvedConfigPaths } from './config/loader.js';
 import type { AppConfig } from './config/schema.js';
 import { AppError, toErrorResponse } from './errors.js';
 import { logger } from './logger.js';
@@ -90,6 +90,24 @@ export const createServerContext = (config = loadConfig()): ServerContext => {
 export const createApp = (context = createServerContext()) => {
   const app = new OpenAPIHono();
 
+  app.use('*', async (c, next) => {
+    const startedAt = Date.now();
+
+    try {
+      await next();
+    } finally {
+      logger.info(
+        {
+          durationMs: Date.now() - startedAt,
+          method: c.req.method,
+          path: c.req.path,
+          status: c.res.status,
+        },
+        'HTTP request'
+      );
+    }
+  });
+
   app.use('*', bearerAuth(context.config.server.token));
   registerAdminRoutes(app, context.config, context.adapters);
   registerModelsRoutes(app, context.config);
@@ -133,9 +151,15 @@ export const createApp = (context = createServerContext()) => {
 export const startServer = (config = loadConfig()) => {
   const context = createServerContext(config);
   const app = createApp(context);
+  const configFiles = resolvedConfigPaths();
 
   logger.info(
-    { host: config.server.host, port: config.server.port },
+    {
+      configFiles,
+      host: config.server.host,
+      models: Object.keys(config.models),
+      port: config.server.port,
+    },
     'Starting catraquim'
   );
 

@@ -595,9 +595,12 @@ describe('CodexAdapter', () => {
 
     const adapter = new CodexAdapter({
       ...defaultConfig,
-      codex: {
-        ...defaultConfig.codex,
-        codexHomeSource: '~/source-codex-home',
+      providers: {
+        ...defaultConfig.providers,
+        codex: {
+          ...defaultConfig.providers.codex,
+          homePath: '~/source-codex-home',
+        },
       },
     });
 

@@ -1,5 +1,5 @@
-import { EventEmitter } from 'node:events';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { createInterface } from 'node:readline';
 import { PassThrough } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +16,7 @@ import { defaultConfig } from '../../src/config/defaults.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 vi.mock('../../src/adapters/codex/auth-bridge.js', () => ({
+  gatewayCodexHome: vi.fn(() => '/tmp/mock-codex-home'),
   prepareCodexHome: vi.fn(() => '/tmp/mock-codex-home'),
 }));
 
@@ -31,7 +32,9 @@ class MockCodexServer extends EventEmitter {
   readonly pid = 9999;
 
   private readonly rl: ReturnType<typeof createInterface>;
-  private readonly messageHandlers: Array<(msg: Record<string, unknown>) => void> = [];
+  private readonly messageHandlers: Array<
+    (msg: Record<string, unknown>) => void
+  > = [];
 
   constructor() {
     super();
@@ -56,15 +59,15 @@ class MockCodexServer extends EventEmitter {
   }
 
   respond(id: number, result: unknown): void {
-    this.stdout.push(JSON.stringify({ id, result }) + '\n');
+    this.stdout.push(`${JSON.stringify({ id, result })}\n`);
   }
 
   sendNotification(method: string, params?: unknown): void {
-    this.stdout.push(JSON.stringify({ method, params }) + '\n');
+    this.stdout.push(`${JSON.stringify({ method, params })}\n`);
   }
 
   sendRequest(id: number, method: string, params?: unknown): void {
-    this.stdout.push(JSON.stringify({ id, method, params }) + '\n');
+    this.stdout.push(`${JSON.stringify({ id, method, params })}\n`);
   }
 }
 
@@ -74,9 +77,10 @@ function createPair() {
   const server = new MockCodexServer();
   mockSpawn.mockReturnValue(server);
 
+  // userAgent format: "<originator>/<semver>", version must be >= 0.118.0
   server.onMessage((msg) => {
     if (msg.method === 'initialize') {
-      server.respond(msg.id as number, { userAgent: 'codex-mock/1.0.0' });
+      server.respond(msg.id as number, { userAgent: 'codex-mock/0.120.0' });
     }
   });
 
@@ -91,7 +95,9 @@ function createPair() {
 describe('isRpcResponse', () => {
   it('matches message with id but no method', () => {
     expect(isRpcResponse({ id: 1, result: {} })).toBe(true);
-    expect(isRpcResponse({ id: 1, error: { code: -1, message: 'err' } })).toBe(true);
+    expect(isRpcResponse({ id: 1, error: { code: -1, message: 'err' } })).toBe(
+      true
+    );
   });
 
   it('rejects message with method', () => {
@@ -138,17 +144,17 @@ describe('CodexAppServerClient – request/response correlation', () => {
     vi.resetAllMocks();
   });
 
-  it('resolves the promise when server responds with the same id', async () => {
+  it('resolves the promise with the correct response', async () => {
     const { client, server } = createPair();
 
     server.onMessage((msg) => {
       if (msg.method === 'thread/start') {
-        server.respond(msg.id as number, { threadId: 'thread-abc' });
+        server.respond(msg.id as number, { thread: { id: 'thread-abc' } });
       }
     });
 
     const result = await client.request('thread/start', { model: 'gpt-5' });
-    expect(result).toEqual({ threadId: 'thread-abc' });
+    expect(result).toEqual({ thread: { id: 'thread-abc' } });
   });
 
   it('rejects on RPC error response', async () => {
@@ -162,7 +168,10 @@ describe('CodexAppServerClient – request/response correlation', () => {
     const requestPromise = client.request('ping', {});
     await new Promise((r) => setTimeout(r, 20));
     server.stdout.push(
-      JSON.stringify({ id: capturedId, error: { code: -32000, message: 'boom' } }) + '\n'
+      `${JSON.stringify({
+        id: capturedId,
+        error: { code: -32000, message: 'boom' },
+      })}\n`
     );
 
     await expect(requestPromise).rejects.toThrow('boom');
@@ -182,24 +191,18 @@ describe('CodexAppServerClient – server-request default responses', () => {
     ['item/tool/call', { contentItems: [], success: false }],
     ['item/commandExecution/requestApproval', { decision: 'decline' }],
     ['item/fileChange/requestApproval', { decision: 'decline' }],
-    ['item/permissions/requestApproval', { decision: 'decline' }],
+    ['item/permissions/requestApproval', { permissions: {}, scope: 'turn' }],
     ['item/tool/requestUserInput', { answers: {} }],
     ['mcpServer/elicitation/request', { action: 'decline' }],
   ])('auto-responds to %s with correct default', async (method, expected) => {
     const { client, server } = createPair();
 
-    // Trigger initialization via a real request
-    let initDone = false;
+    // Trigger initialization
     server.onMessage((msg) => {
-      if (msg.method === 'ping') {
-        server.respond(msg.id as number, {});
-        initDone = true;
-      }
+      if (msg.method === 'ping') server.respond(msg.id as number, {});
     });
     await client.request('ping', {});
-    expect(initDone).toBe(true);
 
-    // Capture responses the client sends back (written to server.stdin)
     const responses: Array<{ id: number; result: unknown }> = [];
     server.onMessage((msg) => {
       if ('result' in msg && !('method' in msg)) {
@@ -224,26 +227,37 @@ describe('runTurn – thread/start → turn/start → turn/completed', () => {
     vi.resetAllMocks();
   });
 
-  it('aggregates notification text and resolves on turn/completed', async () => {
+  it('extracts threadId from thread.id and aggregates delta notifications', async () => {
     const { client, server } = createPair();
 
     server.onMessage((msg) => {
       if (msg.method === 'thread/start') {
-        server.respond(msg.id as number, { threadId: 'turn-thread-1' });
+        server.respond(msg.id as number, { thread: { id: 'tid-1' } });
       }
       if (msg.method === 'turn/start') {
-        server.respond(msg.id as number, { ok: true });
+        server.respond(msg.id as number, {
+          turn: { id: 'turn-1', status: 'running' },
+        });
         setTimeout(() => {
-          server.sendNotification('turn/delta', { delta: 'Hello' });
-          server.sendNotification('turn/delta', { delta: ', world' });
-          server.sendNotification('turn/completed', {});
+          server.sendNotification('turn/delta', {
+            delta: 'Hello',
+            threadId: 'tid-1',
+          });
+          server.sendNotification('turn/delta', {
+            delta: ', world',
+            threadId: 'tid-1',
+          });
+          server.sendNotification('turn/completed', {
+            threadId: 'tid-1',
+            turnId: 'turn-1',
+          });
         }, 10);
       }
     });
 
     const result = await runTurn(
       client,
-      { approvalPolicy: 'never', model: 'gpt-5', modelProvider: 'openai' },
+      { model: 'gpt-5', modelProvider: 'openai' },
       { approvalPolicy: 'never', model: 'gpt-5' },
       new AbortController().signal
     );
@@ -251,16 +265,128 @@ describe('runTurn – thread/start → turn/start → turn/completed', () => {
     expect(result.text).toBe('Hello, world');
   });
 
-  it('rejects and sends turn/interrupt on abort', async () => {
+  it('resolves from turn/start when it returns status completed with items', async () => {
+    const { client, server } = createPair();
+
+    server.onMessage((msg) => {
+      if (msg.method === 'thread/start') {
+        server.respond(msg.id as number, { thread: { id: 'tid-sync' } });
+      }
+      if (msg.method === 'turn/start') {
+        server.respond(msg.id as number, {
+          turn: {
+            id: 'turn-sync',
+            status: 'completed',
+            items: [{ type: 'agentMessage', text: 'Instant reply' }],
+          },
+        });
+      }
+    });
+
+    const result = await runTurn(
+      client,
+      { model: 'gpt-5', modelProvider: 'openai' },
+      { approvalPolicy: 'never', model: 'gpt-5' },
+      new AbortController().signal
+    );
+
+    expect(result.text).toBe('Instant reply');
+  });
+
+  it('ignores turn/completed for a different threadId', async () => {
+    const { client, server } = createPair();
+
+    server.onMessage((msg) => {
+      if (msg.method === 'thread/start') {
+        server.respond(msg.id as number, { thread: { id: 'tid-mine' } });
+      }
+      if (msg.method === 'turn/start') {
+        server.respond(msg.id as number, {
+          turn: { id: 'turn-mine', status: 'running' },
+        });
+        setTimeout(() => {
+          server.sendNotification('turn/completed', {
+            threadId: 'tid-other',
+            turnId: 'turn-other',
+          });
+          setTimeout(() => {
+            server.sendNotification('turn/delta', {
+              delta: 'ok',
+              threadId: 'tid-mine',
+            });
+            server.sendNotification('turn/completed', {
+              threadId: 'tid-mine',
+              turnId: 'turn-mine',
+            });
+          }, 10);
+        }, 10);
+      }
+    });
+
+    const result = await runTurn(
+      client,
+      { model: 'gpt-5', modelProvider: 'openai' },
+      { approvalPolicy: 'never', model: 'gpt-5' },
+      new AbortController().signal
+    );
+
+    expect(result.text).toBe('ok');
+  });
+
+  it('ignores turn/completed for a stale turnId within the same thread', async () => {
+    const { client, server } = createPair();
+
+    server.onMessage((msg) => {
+      if (msg.method === 'thread/start') {
+        server.respond(msg.id as number, { thread: { id: 'tid-t' } });
+      }
+      if (msg.method === 'turn/start') {
+        server.respond(msg.id as number, {
+          turn: { id: 'turn-t', status: 'running' },
+        });
+        setTimeout(() => {
+          // Same thread, wrong turn — must be ignored
+          server.sendNotification('turn/completed', {
+            threadId: 'tid-t',
+            turnId: 'turn-stale',
+          });
+          setTimeout(() => {
+            server.sendNotification('turn/completed', {
+              threadId: 'tid-t',
+              turnId: 'turn-t',
+              turn: {
+                id: 'turn-t',
+                status: 'completed',
+                items: [{ type: 'agentMessage', text: 'correct' }],
+              },
+            });
+          }, 10);
+        }, 10);
+      }
+    });
+
+    const result = await runTurn(
+      client,
+      { model: 'gpt-5', modelProvider: 'openai' },
+      { approvalPolicy: 'never', model: 'gpt-5' },
+      new AbortController().signal
+    );
+
+    expect(result.text).toBe('correct');
+  });
+
+  it('rejects and sends turn/interrupt with threadId and turnId on abort', async () => {
     const { client, server } = createPair();
 
     const interrupted: unknown[] = [];
     server.onMessage((msg) => {
       if (msg.method === 'thread/start') {
-        server.respond(msg.id as number, { threadId: 'abort-thread' });
+        server.respond(msg.id as number, { thread: { id: 'tid-abort' } });
       }
       if (msg.method === 'turn/start') {
-        server.respond(msg.id as number, { ok: true });
+        server.respond(msg.id as number, {
+          turn: { id: 'turn-abort', status: 'running' },
+        });
       }
       if (msg.method === 'turn/interrupt') {
         interrupted.push(msg.params);
@@ -270,7 +396,7 @@ describe('runTurn – thread/start → turn/start → turn/completed', () => {
     const ac = new AbortController();
     const promise = runTurn(
       client,
-      { approvalPolicy: 'never', model: 'gpt-5', modelProvider: 'openai' },
+      { model: 'gpt-5', modelProvider: 'openai' },
       { approvalPolicy: 'never', model: 'gpt-5' },
       ac.signal
     );
@@ -279,6 +405,11 @@ describe('runTurn – thread/start → turn/start → turn/completed', () => {
     ac.abort();
 
     await expect(promise).rejects.toThrow();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(interrupted[0]).toMatchObject({
+      threadId: 'tid-abort',
+      turnId: 'turn-abort',
+    });
   });
 });
 

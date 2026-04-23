@@ -19,27 +19,46 @@ const CODEX_MODEL_IDS = [
   'gpt-5.1-codex',
 ] as const;
 
+const modelIdsForProviderType = (
+  type: AppConfig['providers'][string]['type']
+) => {
+  switch (type) {
+    case 'codex':
+      return CODEX_MODEL_IDS;
+    default:
+      return [];
+  }
+};
+
 export class ProviderModelCatalog {
-  public constructor(private readonly providers: AppConfig['providers']) {}
+  private readonly entries: ProviderCatalogEntry[];
+  private readonly modelIdsByProvider: ReadonlyMap<string, ReadonlySet<string>>;
+
+  public constructor(providers: AppConfig['providers']) {
+    this.entries = Object.entries(providers).flatMap(([providerId, provider]) =>
+      modelIdsForProviderType(provider.type).map((modelId) => ({
+        canonicalRef: modelKey(providerId, modelId),
+        modelId,
+        providerId,
+      }))
+    );
+    this.modelIdsByProvider = new Map(
+      Object.entries(providers).map(([providerId, provider]) => [
+        providerId,
+        new Set(modelIdsForProviderType(provider.type)),
+      ])
+    );
+  }
 
   public list(): ProviderCatalogEntry[] {
-    return Object.entries(this.providers).flatMap(([providerId, provider]) => {
-      switch (provider.type) {
-        case 'codex':
-          return CODEX_MODEL_IDS.map((modelId) => ({
-            canonicalRef: modelKey(providerId, modelId),
-            modelId,
-            providerId,
-          }));
-        default:
-          return [];
-      }
-    });
+    return this.entries;
+  }
+
+  public listForProvider(providerId: string): ProviderCatalogEntry[] {
+    return this.entries.filter((entry) => entry.providerId === providerId);
   }
 
   public has(providerId: string, modelId: string): boolean {
-    return this.list().some(
-      (entry) => entry.providerId === providerId && entry.modelId === modelId
-    );
+    return this.modelIdsByProvider.get(providerId)?.has(modelId) ?? false;
   }
 }

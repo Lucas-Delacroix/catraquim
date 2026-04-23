@@ -1,5 +1,30 @@
 import { z } from '@hono/zod-openapi';
 
+const positiveInt = z.number().int().positive();
+const nonEmptyString = z.string().min(1);
+
+const toolFunctionSchema = z.object({
+  description: z.string().optional(),
+  name: nonEmptyString,
+  parameters: z.record(z.string(), z.unknown()).optional(),
+});
+
+const assistantMessageSchema = z.object({
+  role: z.literal('assistant'),
+  content: z.string(),
+});
+
+const chatChoiceSchema = z.object({
+  index: z.number().int(),
+  finish_reason: z.string().nullable(),
+  message: assistantMessageSchema,
+});
+
+const serverInfoSchema = z.object({
+  host: z.string(),
+  port: positiveInt,
+});
+
 export const errorResponseSchema = z
   .object({
     error: z.object({
@@ -17,11 +42,7 @@ export const errorResponseSchema = z
 
 export const toolDefinitionSchema = z
   .object({
-    function: z.object({
-      description: z.string().optional(),
-      name: z.string(),
-      parameters: z.record(z.string(), z.unknown()).optional(),
-    }),
+    function: toolFunctionSchema,
     type: z.literal('function'),
   })
   .openapi('ToolDefinition');
@@ -38,9 +59,9 @@ export type ChatMessageInput = z.infer<typeof chatMessageSchema>;
 
 export const chatCompletionRequestSchema = z
   .object({
-    max_tokens: z.number().int().positive().optional(),
+    max_tokens: positiveInt.optional(),
     messages: z.array(chatMessageSchema).min(1),
-    model: z.string().min(1),
+    model: nonEmptyString,
     stream: z.boolean().default(false),
     temperature: z.number().min(0).max(2).optional(),
     tools: z.array(toolDefinitionSchema).optional(),
@@ -61,16 +82,7 @@ export const chatCompletionResponseSchema = z
     object: z.literal('chat.completion'),
     created: z.number().int(),
     model: z.string(),
-    choices: z.array(
-      z.object({
-        index: z.number().int(),
-        finish_reason: z.string().nullable(),
-        message: z.object({
-          role: z.literal('assistant'),
-          content: z.string(),
-        }),
-      })
-    ),
+    choices: z.array(chatChoiceSchema),
     usage: usageSchema.optional(),
   })
   .openapi('ChatCompletionResponse');
@@ -95,10 +107,7 @@ export const modelsResponseSchema = z
 export const healthzResponseSchema = z
   .object({
     ok: z.boolean(),
-    server: z.object({
-      host: z.string(),
-      port: z.number().int().positive(),
-    }),
+    server: serverInfoSchema,
   })
   .openapi('HealthzResponse');
 

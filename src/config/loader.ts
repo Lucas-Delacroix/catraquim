@@ -31,7 +31,7 @@ const explicitConfigPath = () => {
   return expandHome(value);
 };
 
-const configPaths = () => {
+const listConfigPaths = () => {
   const explicit = explicitConfigPath();
   return explicit
     ? [explicit]
@@ -40,28 +40,23 @@ const configPaths = () => {
       });
 };
 
-const readUserConfig = (): Partial<AppConfig> => {
-  let mergedConfig: Partial<AppConfig> = {};
-
-  for (const filePath of configPaths()) {
-    if (!existsSync(filePath)) {
-      continue;
-    }
-
-    mergedConfig = mergeConfig(
-      mergeConfig(defaultConfig, mergedConfig),
-      readConfigFile(filePath)
-    );
-  }
-
-  return mergedConfig;
+const readExistingConfigFiles = (filePaths: string[]): Partial<AppConfig>[] => {
+  return filePaths
+    .filter((filePath) => existsSync(filePath))
+    .map((filePath) => readConfigFile(filePath));
 };
 
-export const loadConfig = (): AppConfig => {
-  const merged = mergeConfig(defaultConfig, readUserConfig());
-  const codexProvider = findFirstProviderByType(merged.providers, 'codex');
+const mergeUserConfigs = (configs: Partial<AppConfig>[]): AppConfig => {
+  return configs.reduce(
+    (mergedConfig, config) => mergeConfig(mergedConfig, config),
+    defaultConfig
+  );
+};
 
-  const envAdjusted = mergeConfig(merged, {
+const applyEnvOverrides = (config: AppConfig): AppConfig => {
+  const codexProvider = findFirstProviderByType(config.providers, 'codex');
+
+  return mergeConfig(config, {
     providers: codexProvider
       ? {
           [codexProvider.id]: {
@@ -74,14 +69,19 @@ export const loadConfig = (): AppConfig => {
         }
       : undefined,
     server: {
-      host: merged.server.host,
-      port: Number(readOptionalEnv('CATRAQUIM_PORT') ?? merged.server.port),
-      token: readOptionalEnv('CATRAQUIM_TOKEN') ?? merged.server.token,
+      host: config.server.host,
+      port: Number(readOptionalEnv('CATRAQUIM_PORT') ?? config.server.port),
+      token: readOptionalEnv('CATRAQUIM_TOKEN') ?? config.server.token,
     },
   });
-
-  return appConfigSchema.parse(envAdjusted);
 };
 
-export const resolvedConfigPaths = () => configPaths().filter(existsSync);
+export const loadConfig = (): AppConfig => {
+  const filePaths = listConfigPaths();
+  const fileConfigs = readExistingConfigFiles(filePaths);
+  const mergedConfig = mergeUserConfigs(fileConfigs);
+  return appConfigSchema.parse(applyEnvOverrides(mergedConfig));
+};
+
+export const resolvedConfigPaths = () => listConfigPaths().filter(existsSync);
 export { homeConfigPath, localConfigPath };

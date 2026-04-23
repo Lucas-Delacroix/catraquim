@@ -28,6 +28,45 @@ export interface ServerContext {
   listModels: ListModelsUseCase;
 }
 
+interface RequestLogContext {
+  req: {
+    method: string;
+    path: string;
+  };
+  res: {
+    status: number;
+  };
+}
+
+const buildRequestLog = (c: RequestLogContext, startedAt: number) => ({
+  durationMs: Date.now() - startedAt,
+  method: c.req.method,
+  path: c.req.path,
+  status: c.res.status,
+});
+
+const buildStartupModels = (config: AppConfig) => {
+  return Object.entries(config.models).map(([alias, definition]) => ({
+    alias,
+    canonicalRef: `${definition.adapter}/${definition.upstreamModel}`,
+  }));
+};
+
+const logAppError = (error: AppError) => {
+  logger.warn(
+    {
+      canonicalModel: error.canonicalModel,
+      code: error.code,
+      err: error,
+      provider: error.providerId,
+      requestedModel: error.requestedModel,
+      transient: error.transient,
+      type: error.type,
+    },
+    'Request failed with application error'
+  );
+};
+
 const closeAdapters = (adapters: Adapter[]) => {
   for (const adapter of adapters) {
     try {
@@ -80,53 +119,34 @@ const registerShutdownHandlers = (server: ServerType, adapters: Adapter[]) => {
   server.once('close', removeHandlers);
 };
 
-export const createServerContext = (config = loadConfig()): ServerContext => {
+const createUseCases = (config: AppConfig, adapters: Adapter[]) => {
   const providerModelCatalog = new ProviderModelCatalog(config.providers);
   const modelRegistry = new ModelRegistry(
     config.models,
     config.providers,
     providerModelCatalog
   );
-  const adapters = new ProviderFactory().create(config);
-  const completeChat = new CompleteChatUseCase(modelRegistry, adapters);
-  const getProviderStatuses = new GetProviderStatusesUseCase(adapters);
-  const listModels = new ListModelsUseCase(modelRegistry, providerModelCatalog);
 
   return {
-    adapters,
-    config,
-    completeChat,
-    getProviderStatuses,
-    listModels,
+    completeChat: new CompleteChatUseCase(modelRegistry, adapters),
+    getProviderStatuses: new GetProviderStatusesUseCase(adapters),
+    listModels: new ListModelsUseCase(modelRegistry, providerModelCatalog),
   };
 };
 
-export const createApp = (context = createServerContext()) => {
-  const app = new OpenAPIHono();
-
+const registerRequestLogging = (app: OpenAPIHono) => {
   app.use('*', async (c, next) => {
     const startedAt = Date.now();
 
     try {
       await next();
     } finally {
-      logger.info(
-        {
-          durationMs: Date.now() - startedAt,
-          method: c.req.method,
-          path: c.req.path,
-          status: c.res.status,
-        },
-        'HTTP request'
-      );
+      logger.info(buildRequestLog(c, startedAt), 'HTTP request');
     }
   });
+};
 
-  app.use('*', bearerAuth(context.config.server.token));
-  registerAdminRoutes(app, context.config, context.getProviderStatuses);
-  registerModelsRoutes(app, context.listModels);
-  registerChatRoutes(app, context.completeChat);
-
+const registerApiDocs = (app: OpenAPIHono) => {
   app.doc('/openapi.json', {
     info: {
       title: 'catraquim',
@@ -147,21 +167,12 @@ export const createApp = (context = createServerContext()) => {
       url: '/openapi.json',
     })
   );
+};
 
+const registerErrorHandler = (app: OpenAPIHono) => {
   app.onError((error, c) => {
     if (error instanceof AppError) {
-      logger.warn(
-        {
-          canonicalModel: error.canonicalModel,
-          code: error.code,
-          err: error,
-          provider: error.providerId,
-          requestedModel: error.requestedModel,
-          transient: error.transient,
-          type: error.type,
-        },
-        'Request failed with application error'
-      );
+      logAppError(error);
     } else {
       logger.error({ err: error }, 'Request failed with unexpected error');
     }
@@ -169,6 +180,29 @@ export const createApp = (context = createServerContext()) => {
     const mapped = toErrorResponse(error);
     return c.json({ error: mapped.error }, mapped.statusCode);
   });
+};
+
+export const createServerContext = (config = loadConfig()): ServerContext => {
+  const adapters = new ProviderFactory().create(config);
+  const useCases = createUseCases(config, adapters);
+
+  return {
+    adapters,
+    config,
+    ...useCases,
+  };
+};
+
+export const createApp = (context = createServerContext()) => {
+  const app = new OpenAPIHono();
+
+  registerRequestLogging(app);
+  app.use('*', bearerAuth(context.config.server.token));
+  registerAdminRoutes(app, context.config, context.getProviderStatuses);
+  registerModelsRoutes(app, context.listModels);
+  registerChatRoutes(app, context.completeChat);
+  registerApiDocs(app);
+  registerErrorHandler(app);
 
   return app;
 };
@@ -182,10 +216,7 @@ export const startServer = (config = loadConfig()) => {
     {
       configFiles,
       host: config.server.host,
-      models: Object.entries(config.models).map(([alias, definition]) => ({
-        alias,
-        canonicalRef: `${definition.adapter}/${definition.upstreamModel}`,
-      })),
+      models: buildStartupModels(config),
       port: config.server.port,
     },
     'Starting catraquim'

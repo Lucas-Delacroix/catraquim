@@ -18,6 +18,12 @@ interface PendingRequest {
   timer?: ReturnType<typeof setTimeout>;
 }
 
+interface ProcessStreams {
+  stderr: NonNullable<ChildProcess['stderr']>;
+  stdin: NonNullable<ChildProcess['stdin']>;
+  stdout: NonNullable<ChildProcess['stdout']>;
+}
+
 const SERVER_REQUEST_DEFAULTS: Record<string, unknown> = {
   'item/commandExecution/requestApproval': { decision: 'decline' },
   'item/fileChange/requestApproval': { decision: 'decline' },
@@ -52,28 +58,19 @@ export class CodexRpcTransport {
 
   public constructor(private readonly config: CodexProviderConfig) {}
 
-  public start(): void {
-    if (this.proc && !this.proc.killed) return;
+  private isRunning() {
+    return this.proc && !this.proc.killed;
+  }
 
+  private createProcessEnv() {
     const codexHome = prepareCodexHome(this.config.homePath);
-    const isWindows = process.platform === 'win32';
-    const env = buildChildEnv(process.env, { CODEX_HOME: codexHome }, [
+    return buildChildEnv(process.env, { CODEX_HOME: codexHome }, [
       'OPENAI_API_KEY',
     ]);
+  }
 
-    this.proc = spawn(
-      this.config.binary,
-      ['app-server', '--listen', 'stdio://'],
-      {
-        detached: !isWindows,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }
-    );
-
-    const stdin = this.proc.stdin;
-    const stdout = this.proc.stdout;
-    const stderr = this.proc.stderr;
+  private requireProcessStreams(proc: ChildProcess): ProcessStreams {
+    const { stdin, stdout, stderr } = proc;
 
     if (!stdin || !stdout || !stderr) {
       throw AppError.provider(
@@ -86,73 +83,137 @@ export class CodexRpcTransport {
       );
     }
 
-    stdin.on('error', (error) => {
+    return { stderr, stdin, stdout };
+  }
+
+  private rejectPendingRequest(id: number, error: Error) {
+    const pending = this.pendingRequests.get(id);
+    if (!pending) return;
+
+    this.pendingRequests.delete(id);
+    clearTimeout(pending.timer);
+    pending.reject(error);
+  }
+
+  private rejectAllPending(errorFactory: () => Error) {
+    for (const id of [...this.pendingRequests.keys()]) {
+      this.rejectPendingRequest(id, errorFactory());
+    }
+  }
+
+  private rpcAbortError(method: string) {
+    return AppError.transient(`Codex RPC aborted: ${method}`, 499, undefined, {
+      code: 'rpc_aborted',
+    });
+  }
+
+  private rpcTimeoutError(method: string) {
+    return AppError.transient(`Codex RPC timeout: ${method}`, 504, undefined, {
+      code: 'rpc_timeout',
+    });
+  }
+
+  private stdinWriteError(method: string, error: Error) {
+    return AppError.transient(
+      `Failed to write to Codex app-server stdin: ${method}`,
+      502,
+      error,
+      {
+        code: 'stdin_write_failed',
+      }
+    );
+  }
+
+  private appServerNotRunningError() {
+    return AppError.transient(
+      'Codex app-server is not running',
+      502,
+      undefined,
+      {
+        code: 'app_server_not_running',
+      }
+    );
+  }
+
+  private processError(error: Error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? AppError.configuration(
+          `Codex binary not found: ${this.config.binary}`,
+          500,
+          error,
+          {
+            code: 'binary_not_found',
+            details: {
+              binary: this.config.binary,
+            },
+          }
+        )
+      : AppError.transient('Codex app-server process error', 502, error, {
+          code: 'process_error',
+        });
+  }
+
+  private processExitError(code: number | null, signal: NodeJS.Signals | null) {
+    return AppError.transient(
+      `Codex app-server exited (code=${code ?? 'null'} signal=${signal ?? 'null'})`,
+      502,
+      undefined,
+      {
+        code: 'app_server_exited',
+        details: {
+          code,
+          signal,
+        },
+      }
+    );
+  }
+
+  private attachProcessListeners(streams: ProcessStreams) {
+    streams.stdin.on('error', (error) => {
       logger.warn({ error }, 'codex app-server stdin error');
     });
 
-    const rl = createInterface({ input: stdout });
+    const rl = createInterface({ input: streams.stdout });
     rl.on('line', (line) => this.handleLine(line));
 
-    stderr.on('data', (chunk: Buffer) => {
+    streams.stderr.on('data', (chunk: Buffer) => {
       logger.debug(
         { chunk: chunk.toString('utf8') },
         'codex app-server stderr'
       );
     });
 
-    this.proc.once('error', (error) => {
+    this.proc?.once('error', (error) => {
       logger.warn({ err: error }, 'codex app-server process error');
-
-      for (const [id, pending] of this.pendingRequests) {
-        clearTimeout(pending.timer);
-        pending.reject(
-          (error as NodeJS.ErrnoException).code === 'ENOENT'
-            ? AppError.configuration(
-                `Codex binary not found: ${this.config.binary}`,
-                500,
-                error,
-                {
-                  code: 'binary_not_found',
-                  details: {
-                    binary: this.config.binary,
-                  },
-                }
-              )
-            : AppError.transient('Codex app-server process error', 502, error, {
-                code: 'process_error',
-              })
-        );
-        this.pendingRequests.delete(id);
-      }
+      this.rejectAllPending(() => this.processError(error));
     });
 
-    this.proc.once('exit', (code, signal) => {
+    this.proc?.once('exit', (code, signal) => {
       logger.warn({ code, signal }, 'codex app-server exited');
-
-      for (const [id, pending] of this.pendingRequests) {
-        clearTimeout(pending.timer);
-        pending.reject(
-          AppError.transient(
-            `Codex app-server exited (code=${code ?? 'null'} signal=${signal ?? 'null'})`,
-            502,
-            undefined,
-            {
-              code: 'app_server_exited',
-              details: {
-                code,
-                signal,
-              },
-            }
-          )
-        );
-        this.pendingRequests.delete(id);
-      }
+      this.rejectAllPending(() => this.processExitError(code, signal));
 
       this.proc = undefined;
       for (const handler of [...this.exitHandlers]) {
         handler();
       }
     });
+  }
+
+  public start(): void {
+    if (this.isRunning()) return;
+
+    const isWindows = process.platform === 'win32';
+
+    this.proc = spawn(
+      this.config.binary,
+      ['app-server', '--listen', 'stdio://'],
+      {
+        detached: !isWindows,
+        env: this.createProcessEnv(),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }
+    );
+    this.attachProcessListeners(this.requireProcessStreams(this.proc));
   }
 
   public onExit(handler: () => void): () => void {
@@ -180,11 +241,9 @@ export class CodexRpcTransport {
       const pending = this.pendingRequests.get(msg.id);
       if (!pending) return;
 
-      this.pendingRequests.delete(msg.id);
-      clearTimeout(pending.timer);
-
       if (msg.error) {
-        pending.reject(
+        this.rejectPendingRequest(
+          msg.id,
           AppError.provider(
             `Codex RPC error on request ${msg.id}: ${msg.error.message}`,
             502,
@@ -198,6 +257,8 @@ export class CodexRpcTransport {
           )
         );
       } else {
+        this.pendingRequests.delete(msg.id);
+        clearTimeout(pending.timer);
         pending.resolve(msg.result);
       }
       return;
@@ -237,27 +298,13 @@ export class CodexRpcTransport {
 
     return new Promise((resolve, reject) => {
       if (opts?.signal?.aborted) {
-        reject(
-          AppError.transient(`Codex RPC aborted: ${method}`, 499, undefined, {
-            code: 'rpc_aborted',
-          })
-        );
+        reject(this.rpcAbortError(method));
         return;
       }
 
       const timer = opts?.timeoutMs
         ? setTimeout(() => {
-            this.pendingRequests.delete(id);
-            reject(
-              AppError.transient(
-                `Codex RPC timeout: ${method}`,
-                504,
-                undefined,
-                {
-                  code: 'rpc_timeout',
-                }
-              )
-            );
+            this.rejectPendingRequest(id, this.rpcTimeoutError(method));
           }, opts.timeoutMs)
         : undefined;
 
@@ -266,33 +313,20 @@ export class CodexRpcTransport {
       opts?.signal?.addEventListener(
         'abort',
         () => {
-          if (!this.pendingRequests.has(id)) return;
-          this.pendingRequests.delete(id);
-          clearTimeout(timer);
-          reject(
-            AppError.transient(`Codex RPC aborted: ${method}`, 499, undefined, {
-              code: 'rpc_aborted',
-            })
-          );
+          this.rejectPendingRequest(id, this.rpcAbortError(method));
         },
         { once: true }
       );
 
-      this.proc?.stdin?.write(`${payload}\n`, 'utf8', (error) => {
+      const stdin = this.proc?.stdin;
+      if (!stdin) {
+        this.rejectPendingRequest(id, this.appServerNotRunningError());
+        return;
+      }
+
+      stdin.write(`${payload}\n`, 'utf8', (error) => {
         if (error) {
-          if (!this.pendingRequests.has(id)) return;
-          this.pendingRequests.delete(id);
-          clearTimeout(timer);
-          reject(
-            AppError.transient(
-              `Failed to write to Codex app-server stdin: ${method}`,
-              502,
-              error,
-              {
-                code: 'stdin_write_failed',
-              }
-            )
-          );
+          this.rejectPendingRequest(id, this.stdinWriteError(method, error));
         }
       });
     });

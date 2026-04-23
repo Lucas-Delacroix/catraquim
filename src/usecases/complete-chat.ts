@@ -18,6 +18,11 @@ export interface ChatCompletionResult {
   usage?: Usage;
 }
 
+interface ExecutionContext {
+  provider: Adapter;
+  request: ResolvedChatRequest;
+}
+
 export class CompleteChatUseCase {
   private readonly providersById: ReadonlyMap<string, Adapter>;
 
@@ -34,10 +39,7 @@ export class CompleteChatUseCase {
     return this.modelRegistry.resolve(model);
   }
 
-  private resolveExecution(request: ChatRequest): {
-    provider: Adapter;
-    resolvedRequest: ResolvedChatRequest;
-  } {
+  private resolveExecutionContext(request: ChatRequest): ExecutionContext {
     const binding = this.modelRegistry.resolve(request.model);
     const provider = this.providersById.get(binding.providerId);
 
@@ -57,7 +59,7 @@ export class CompleteChatUseCase {
 
     return {
       provider,
-      resolvedRequest: {
+      request: {
         ...request,
         canonicalModel: binding.canonicalModel,
         providerId: binding.providerId,
@@ -68,12 +70,12 @@ export class CompleteChatUseCase {
 
   private toExecutionError(
     error: unknown,
-    resolvedRequest: ResolvedChatRequest
+    request: ResolvedChatRequest
   ): AppError {
     const metadata = {
-      canonicalModel: resolvedRequest.canonicalModel,
-      providerId: resolvedRequest.providerId,
-      requestedModel: resolvedRequest.model,
+      canonicalModel: request.canonicalModel,
+      providerId: request.providerId,
+      requestedModel: request.model,
     };
 
     if (error instanceof AppError) {
@@ -91,61 +93,56 @@ export class CompleteChatUseCase {
     });
   }
 
+  private async *streamCompletion(
+    context: ExecutionContext,
+    signal: AbortSignal
+  ): AsyncIterable<ChatChunk> {
+    try {
+      yield* context.provider.chat(context.request, signal);
+    } catch (error) {
+      throw this.toExecutionError(error, context.request);
+    }
+  }
+
   public stream(
     request: ChatRequest,
     signal: AbortSignal
   ): AsyncIterable<ChatChunk> {
-    const { provider, resolvedRequest } = this.resolveExecution(request);
-
-    return {
-      [Symbol.asyncIterator]: async function* (
-        this: CompleteChatUseCase
-      ): AsyncIterable<ChatChunk> {
-        try {
-          yield* provider.chat(resolvedRequest, signal);
-        } catch (error) {
-          throw this.toExecutionError(error, resolvedRequest);
-        }
-      }.bind(this),
-    };
+    return this.streamCompletion(this.resolveExecutionContext(request), signal);
   }
 
   public async execute(
     request: ChatRequest,
     signal: AbortSignal
   ): Promise<ChatCompletionResult> {
-    const { provider, resolvedRequest } = this.resolveExecution(request);
+    const context = this.resolveExecutionContext(request);
     let content = '';
     let finishReason: string | null = null;
     let usage: Usage | undefined;
 
-    try {
-      for await (const chunk of provider.chat(resolvedRequest, signal)) {
-        content += chunk.delta;
-        finishReason = chunk.finishReason ?? finishReason;
-        usage = chunk.usage ?? usage;
-      }
-    } catch (error) {
-      throw this.toExecutionError(error, resolvedRequest);
+    for await (const chunk of this.streamCompletion(context, signal)) {
+      content += chunk.delta;
+      finishReason = chunk.finishReason ?? finishReason;
+      usage = chunk.usage ?? usage;
     }
 
     logger.info(
       {
-        canonicalModel: resolvedRequest.canonicalModel,
+        canonicalModel: context.request.canonicalModel,
         finishReason,
-        provider: resolvedRequest.providerId,
-        requestedModel: resolvedRequest.model,
+        provider: context.request.providerId,
+        requestedModel: context.request.model,
         usage,
       },
       'Chat completion completed'
     );
 
     return {
-      canonicalModel: resolvedRequest.canonicalModel,
+      canonicalModel: context.request.canonicalModel,
       content,
       finishReason,
-      providerId: resolvedRequest.providerId,
-      requestedModel: resolvedRequest.model,
+      providerId: context.request.providerId,
+      requestedModel: context.request.model,
       usage,
     };
   }

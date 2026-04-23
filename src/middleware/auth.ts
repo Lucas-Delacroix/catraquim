@@ -1,5 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 
+import { AppError } from '../errors.js';
+
 export const bearerAuth = (token: string | null): MiddlewareHandler => {
   return async (c, next) => {
     if (!token) {
@@ -11,15 +13,9 @@ export const bearerAuth = (token: string | null): MiddlewareHandler => {
     const expected = `Bearer ${token}`;
 
     if (header !== expected) {
-      return c.json(
-        {
-          error: {
-            message: 'Unauthorized',
-            type: 'authentication_error',
-          },
-        },
-        401
-      );
+      throw AppError.authentication('Unauthorized', 401, undefined, {
+        code: 'invalid_bearer_token',
+      });
     }
 
     await next();

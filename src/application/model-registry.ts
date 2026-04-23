@@ -68,12 +68,4 @@ export class ModelRegistry {
       requestedModel: model,
     });
   }
-
-  public hasProvider(providerId: string): boolean {
-    return providerId in this.providers;
-  }
-
-  public listCanonicalRefs(): string[] {
-    return this.list().map((definition) => definition.canonicalRef);
-  }
 }

@@ -1,6 +1,5 @@
 import type { OpenAPIHono } from '@hono/zod-openapi';
 
-import type { ChatMessage, ToolDefinition } from '../adapters/base.js';
 import {
   createNotImplementedStreamPayload,
   toOpenAiChatCompletion,
@@ -13,16 +12,9 @@ import {
   jsonResponse,
 } from './openapi.js';
 import {
-  type ChatMessageInput,
-  type ToolDefinitionInput,
   chatCompletionRequestSchema,
   chatCompletionResponseSchema,
 } from './schemas.js';
-
-const mapMessages = (messages: ChatMessageInput[]): ChatMessage[] => messages;
-const mapTools = (
-  tools?: ToolDefinitionInput[]
-): ToolDefinition[] | undefined => tools;
 
 const chatCompletionsRoute = createApiRoute({
   method: 'post',
@@ -56,11 +48,11 @@ export const registerChatRoutes = (
     const result = await completeChat.execute(
       {
         maxTokens: body.max_tokens,
-        messages: mapMessages(body.messages),
+        messages: body.messages,
         model: body.model,
         stream: false,
         temperature: body.temperature,
-        tools: mapTools(body.tools),
+        tools: body.tools,
       },
       c.req.raw.signal
     );

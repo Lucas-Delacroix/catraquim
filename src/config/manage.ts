@@ -118,6 +118,19 @@ export interface PromptApi {
   close(): void;
 }
 
+interface ModelPromptDefaults {
+  alias: string;
+  canonicalModel: string;
+}
+
+interface PromptedModel {
+  alias: string;
+  binding: {
+    providerId: string;
+    upstreamModel: string;
+  };
+}
+
 const normalizeToken = (value: string) => {
   const trimmed = value.trim();
   return trimmed === '' ? null : trimmed;
@@ -165,6 +178,54 @@ const parseCanonicalModelInput = (value: string, providerId: string) => {
     providerId: parsedProviderId,
     upstreamModel,
   };
+};
+
+const promptModel = async (
+  prompts: PromptApi,
+  labels: {
+    alias: string;
+    canonicalModel: string;
+  },
+  defaults: ModelPromptDefaults,
+  providerId: string
+): Promise<PromptedModel> => {
+  const alias = await prompts.ask(labels.alias, defaults.alias);
+  const canonicalModel = await prompts.ask(
+    labels.canonicalModel,
+    defaults.canonicalModel
+  );
+
+  return {
+    alias,
+    binding: parseCanonicalModelInput(canonicalModel, providerId),
+  };
+};
+
+const buildModelsConfig = (
+  primary: PromptedModel,
+  secondary?: PromptedModel
+): AppConfig['models'] => {
+  if (secondary && secondary.alias === primary.alias) {
+    throw new AppError('Model aliases must be different', 400);
+  }
+
+  const models: AppConfig['models'] = {
+    [primary.alias]: {
+      adapter: primary.binding.providerId,
+      upstreamModel: primary.binding.upstreamModel,
+    },
+  };
+
+  if (!secondary) {
+    return models;
+  }
+
+  models[secondary.alias] = {
+    adapter: secondary.binding.providerId,
+    upstreamModel: secondary.binding.upstreamModel,
+  };
+
+  return models;
 };
 
 const createPromptApi = (
@@ -266,56 +327,40 @@ export const setupConfig = async ({
       'Codex home',
       currentProvider.config.homePath
     );
-    const primaryAlias = await prompts.ask(
-      'Primary model alias',
-      firstModel[0]
-    );
-    const primaryCanonicalModel = await prompts.ask(
-      'Primary canonical model',
-      `${providerId}/${firstModel[1].upstreamModel}`
+    const primaryModel = await promptModel(
+      prompts,
+      {
+        alias: 'Primary model alias',
+        canonicalModel: 'Primary canonical model',
+      },
+      {
+        alias: firstModel[0],
+        canonicalModel: `${providerId}/${firstModel[1].upstreamModel}`,
+      },
+      providerId
     );
     const includeSecondModel = await prompts.confirm(
       'Configure a second model',
       modelEntries.length > 1
     );
 
-    let secondAlias = '';
-    let secondCanonicalModel = '';
+    let secondModelInput: PromptedModel | undefined;
     if (includeSecondModel) {
-      secondAlias = await prompts.ask('Second model alias', secondModel[0]);
-      secondCanonicalModel = await prompts.ask(
-        'Second canonical model',
-        `${providerId}/${secondModel[1].upstreamModel}`
-      );
-    }
-
-    const primaryBinding = parseCanonicalModelInput(
-      primaryCanonicalModel,
-      providerId
-    );
-
-    const models: AppConfig['models'] = {
-      [primaryAlias]: {
-        adapter: primaryBinding.providerId,
-        upstreamModel: primaryBinding.upstreamModel,
-      },
-    };
-
-    if (includeSecondModel) {
-      if (secondAlias === primaryAlias) {
-        throw new AppError('Model aliases must be different', 400);
-      }
-
-      const secondBinding = parseCanonicalModelInput(
-        secondCanonicalModel,
+      secondModelInput = await promptModel(
+        prompts,
+        {
+          alias: 'Second model alias',
+          canonicalModel: 'Second canonical model',
+        },
+        {
+          alias: secondModel[0],
+          canonicalModel: `${providerId}/${secondModel[1].upstreamModel}`,
+        },
         providerId
       );
-
-      models[secondAlias] = {
-        adapter: secondBinding.providerId,
-        upstreamModel: secondBinding.upstreamModel,
-      };
     }
+
+    const models = buildModelsConfig(primaryModel, secondModelInput);
 
     const nextConfig = appConfigSchema.parse({
       models,

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+
+import { expandHome } from '../config/store.js';
 
 export interface CodexAuthStatus {
   expiresAt: string | null;
@@ -8,21 +9,7 @@ export interface CodexAuthStatus {
   ok: boolean;
 }
 
-const resolveCodexHome = (source?: string) => {
-  if (!source) {
-    return join(homedir(), '.codex');
-  }
-
-  if (source === '~') {
-    return homedir();
-  }
-
-  if (source.startsWith('~/')) {
-    return join(homedir(), source.slice(2));
-  }
-
-  return source;
-};
+const resolveCodexHome = (source?: string) => expandHome(source ?? '~/.codex');
 
 export const getCodexAuthStatus = async (
   source?: string

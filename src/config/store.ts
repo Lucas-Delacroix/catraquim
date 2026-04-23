@@ -15,6 +15,116 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
+const toCanonicalModelBinding = (canonicalRef: string) => {
+  const parsed = parseModelRef(canonicalRef);
+  if (!parsed) {
+    return undefined;
+  }
+
+  return {
+    adapter: parsed.providerId,
+    upstreamModel: parsed.model,
+  };
+};
+
+const normalizeModelValue = (value: unknown) => {
+  if (typeof value === 'string') {
+    return toCanonicalModelBinding(value) ?? value;
+  }
+
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const canonicalRef =
+    typeof value.canonicalRef === 'string'
+      ? value.canonicalRef
+      : typeof value.providerModel === 'string'
+        ? value.providerModel
+        : undefined;
+
+  return canonicalRef
+    ? (toCanonicalModelBinding(canonicalRef) ?? value)
+    : value;
+};
+
+const normalizeModels = (rawModels: unknown) => {
+  if (!isRecord(rawModels)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(rawModels).map(([alias, modelValue]) => [
+      alias,
+      normalizeModelValue(modelValue),
+    ])
+  );
+};
+
+const looksLikeLegacyCodexProvider = (
+  providerId: string,
+  providerValue: Record<string, unknown>
+) => {
+  return (
+    providerId === 'codex' ||
+    providerValue.type === 'codex' ||
+    'binary' in providerValue ||
+    'codexHomeSource' in providerValue
+  );
+};
+
+const normalizeProviderValue = (
+  providerValue: Record<string, unknown>
+): ProviderConfig => {
+  const { codexHomeSource, homePath, type, ...providerRest } = providerValue;
+
+  return {
+    ...providerRest,
+    homePath:
+      typeof homePath === 'string'
+        ? homePath
+        : typeof codexHomeSource === 'string'
+          ? codexHomeSource
+          : undefined,
+    type: type === 'codex' ? type : 'codex',
+  } as ProviderConfig;
+};
+
+const normalizeProviders = (
+  rawProviders: unknown,
+  legacyCodex: unknown
+): Record<string, ProviderConfig | unknown> => {
+  const providers = isRecord(rawProviders) ? { ...rawProviders } : {};
+
+  if (!('codex' in providers) && isRecord(legacyCodex)) {
+    providers.codex = legacyCodex;
+  }
+
+  return Object.fromEntries(
+    Object.entries(providers).map(([providerId, providerValue]) => {
+      if (!isRecord(providerValue)) {
+        return [providerId, providerValue];
+      }
+
+      return [
+        providerId,
+        looksLikeLegacyCodexProvider(providerId, providerValue)
+          ? normalizeProviderValue(providerValue)
+          : providerValue,
+      ];
+    })
+  );
+};
+
+const serializeModels = (models: AppConfig['models']) => {
+  return Object.fromEntries(
+    Object.entries(models).map(([alias, definition]) => [
+      alias,
+      modelKey(definition.adapter, definition.upstreamModel),
+    ])
+  );
+};
+
 export const expandHome = (value: string) => {
   if (value === '~') {
     return homedir();
@@ -34,80 +144,11 @@ export const normalizeConfigShape = (raw: Record<string, unknown>) => {
     providers: rawProviders,
     ...rest
   } = raw;
-  const providers = isRecord(rawProviders) ? { ...rawProviders } : {};
-  const models = isRecord(rawModels) ? { ...rawModels } : {};
-
-  for (const [alias, modelValue] of Object.entries(models)) {
-    if (typeof modelValue === 'string') {
-      const parsed = parseModelRef(modelValue);
-      if (parsed) {
-        models[alias] = {
-          adapter: parsed.providerId,
-          upstreamModel: parsed.model,
-        };
-      }
-      continue;
-    }
-
-    if (!isRecord(modelValue)) {
-      continue;
-    }
-
-    const canonicalRef =
-      typeof modelValue.canonicalRef === 'string'
-        ? modelValue.canonicalRef
-        : typeof modelValue.providerModel === 'string'
-          ? modelValue.providerModel
-          : undefined;
-
-    if (!canonicalRef) {
-      continue;
-    }
-
-    const parsed = parseModelRef(canonicalRef);
-    if (parsed) {
-      models[alias] = {
-        adapter: parsed.providerId,
-        upstreamModel: parsed.model,
-      };
-    }
-  }
-
-  if (!('codex' in providers) && isRecord(legacyCodex)) {
-    providers.codex = legacyCodex;
-  }
-
-  for (const [providerId, providerValue] of Object.entries(providers)) {
-    if (!isRecord(providerValue)) {
-      continue;
-    }
-
-    if (
-      providerId === 'codex' ||
-      providerValue.type === 'codex' ||
-      'binary' in providerValue ||
-      'codexHomeSource' in providerValue
-    ) {
-      const { codexHomeSource, homePath, type, ...providerRest } =
-        providerValue;
-
-      providers[providerId] = {
-        ...providerRest,
-        homePath:
-          typeof homePath === 'string'
-            ? homePath
-            : typeof codexHomeSource === 'string'
-              ? codexHomeSource
-              : undefined,
-        type: type === 'codex' ? type : 'codex',
-      };
-    }
-  }
 
   return {
     ...rest,
-    models,
-    providers,
+    models: normalizeModels(rawModels),
+    providers: normalizeProviders(rawProviders, legacyCodex),
   };
 };
 
@@ -198,12 +239,7 @@ export const serializeConfig = (config: AppConfig) =>
   `${JSON.stringify(
     {
       ...config,
-      models: Object.fromEntries(
-        Object.entries(config.models).map(([alias, definition]) => [
-          alias,
-          modelKey(definition.adapter, definition.upstreamModel),
-        ])
-      ),
+      models: serializeModels(config.models),
     },
     null,
     2

@@ -14,17 +14,21 @@ interface CodexTurn {
   status: string;
 }
 
+function parseEmbeddedErrorMessage(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw) as {
+      error?: { message?: string };
+      message?: string;
+    };
+    return parsed.error?.message ?? parsed.message ?? raw;
+  } catch {
+    return raw;
+  }
+}
+
 function extractTurnErrorMessage(error: unknown): string | undefined {
   if (typeof error === 'string') {
-    try {
-      const parsed = JSON.parse(error) as {
-        error?: { message?: string };
-        message?: string;
-      };
-      return parsed.error?.message ?? parsed.message ?? error;
-    } catch {
-      return error;
-    }
+    return parseEmbeddedErrorMessage(error);
   }
 
   if (typeof error !== 'object' || error === null) {
@@ -36,15 +40,7 @@ function extractTurnErrorMessage(error: unknown): string | undefined {
     return undefined;
   }
 
-  try {
-    const parsed = JSON.parse(record.message) as {
-      error?: { message?: string };
-      message?: string;
-    };
-    return parsed.error?.message ?? parsed.message ?? record.message;
-  } catch {
-    return record.message;
-  }
+  return parseEmbeddedErrorMessage(record.message);
 }
 
 function errorForTurnStatus(turn: CodexTurn): AppError {
@@ -82,6 +78,14 @@ function isTerminalFailureStatus(status: string): boolean {
   return status === 'failed' || status === 'interrupted';
 }
 
+function toRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
+}
+
 function extractTextFragments(value: unknown): string[] {
   if (typeof value === 'string') {
     return [value];
@@ -95,7 +99,11 @@ function extractTextFragments(value: unknown): string[] {
     return [];
   }
 
-  const record = value as Record<string, unknown>;
+  const record = toRecord(value);
+  if (!record) {
+    return [];
+  }
+
   if (typeof record.text === 'string') {
     return [record.text];
   }
@@ -153,9 +161,39 @@ function normalizeTurnResponse(raw: unknown): CodexTurn | undefined {
 }
 
 function extractDeltaText(msg: CodexRpcNotificationMessage): string {
-  const params = msg.params as Record<string, unknown> | undefined;
+  const params = toRecord(msg.params);
   if (!params) return '';
   return extractTextFragments(params).join('');
+}
+
+function isMatchingThread(
+  params: Record<string, unknown> | undefined,
+  threadId: string
+): boolean {
+  return params?.threadId === undefined || params.threadId === threadId;
+}
+
+function isMatchingTurn(
+  params: Record<string, unknown> | undefined,
+  turnId: string | undefined
+): boolean {
+  return (
+    turnId === undefined ||
+    params?.turnId === undefined ||
+    params.turnId === turnId
+  );
+}
+
+function pushFinalText(
+  texts: string[],
+  items: Array<Record<string, unknown>> | undefined
+) {
+  const finalText = extractTurnItemsText(items);
+  if (finalText) {
+    texts.push(finalText);
+  }
+
+  return finalText;
 }
 
 export async function runTurn(
@@ -175,10 +213,34 @@ export async function runTurn(
   return new Promise((resolve, reject) => {
     const texts: string[] = [];
 
-    const removeListener = client.onNotification((msg) => {
-      const params = msg.params as Record<string, unknown> | undefined;
+    const cleanup = () => {
+      removeListener();
+      signal.removeEventListener('abort', handleAbort);
+    };
 
-      if (params?.threadId !== undefined && params.threadId !== threadId) {
+    const rejectTurn = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const resolveTurn = (
+      items: Array<Record<string, unknown>> | undefined,
+      context: Record<string, unknown>,
+      emptyTextWarning: string
+    ) => {
+      const finalText = pushFinalText(texts, items);
+      if (!finalText && texts.length === 0) {
+        logger.warn(context, emptyTextWarning);
+      }
+
+      cleanup();
+      resolve({ text: texts.join('') });
+    };
+
+    const removeListener = client.onNotification((msg) => {
+      const params = toRecord(msg.params);
+
+      if (!isMatchingThread(params, threadId)) {
         return;
       }
 
@@ -189,40 +251,26 @@ export async function runTurn(
         return;
       }
 
-      if (
-        turnId !== undefined &&
-        params?.turnId !== undefined &&
-        params.turnId !== turnId
-      ) {
+      if (!isMatchingTurn(params, turnId)) {
         return;
       }
 
       const turn = params?.turn as CodexTurn | undefined;
       if (turn && isTerminalFailureStatus(turn.status)) {
-        removeListener();
-        signal.removeEventListener('abort', handleAbort);
-        reject(errorForTurnStatus(turn));
+        rejectTurn(errorForTurnStatus(turn));
         return;
       }
 
-      const finalText = extractTurnItemsText(turn?.items);
-      if (finalText) texts.push(finalText);
-      if (!finalText && texts.length === 0) {
-        logger.warn(
-          { params, threadId, turnId },
-          'Codex turn/completed notification had no extractable assistant text'
-        );
-      }
-
-      removeListener();
-      signal.removeEventListener('abort', handleAbort);
-      resolve({ text: texts.join('') });
+      resolveTurn(
+        turn?.items,
+        { params, threadId, turnId },
+        'Codex turn/completed notification had no extractable assistant text'
+      );
     });
 
     const handleAbort = () => {
-      removeListener();
       client.notify('turn/interrupt', { threadId, turnId }).catch(() => {});
-      reject(
+      rejectTurn(
         AppError.transient('Turn aborted', 499, undefined, {
           code: 'turn_aborted',
         })
@@ -249,9 +297,7 @@ export async function runTurn(
         turnId = turn.id;
 
         if (isTerminalFailureStatus(turn.status)) {
-          removeListener();
-          signal.removeEventListener('abort', handleAbort);
-          reject(errorForTurnStatus(turn));
+          rejectTurn(errorForTurnStatus(turn));
           return;
         }
 
@@ -259,23 +305,14 @@ export async function runTurn(
           return;
         }
 
-        const finalText = extractTurnItemsText(turn.items);
-        if (finalText) texts.push(finalText);
-        if (!finalText && texts.length === 0) {
-          logger.warn(
-            { threadId, turnId, turn },
-            'Codex turn completed without extractable assistant text'
-          );
-        }
-
-        removeListener();
-        signal.removeEventListener('abort', handleAbort);
-        resolve({ text: texts.join('') });
+        resolveTurn(
+          turn.items,
+          { threadId, turnId, turn },
+          'Codex turn completed without extractable assistant text'
+        );
       })
       .catch((error: Error) => {
-        removeListener();
-        signal.removeEventListener('abort', handleAbort);
-        reject(error);
+        rejectTurn(error);
       });
   });
 }

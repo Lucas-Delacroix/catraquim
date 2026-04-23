@@ -29,6 +29,7 @@ export interface ChatRequest {
 }
 
 export interface ResolvedChatRequest extends ChatRequest {
+  canonicalModel: string;
   providerId: string;
   upstreamModel: string;
 }

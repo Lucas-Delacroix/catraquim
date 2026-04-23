@@ -1,7 +1,6 @@
 import type { OpenAPIHono } from '@hono/zod-openapi';
 
 import type { ChatMessage, ToolDefinition } from '../adapters/base.js';
-import { toErrorResponse } from '../errors.js';
 import {
   createNotImplementedStreamPayload,
   toOpenAiChatCompletion,
@@ -34,7 +33,7 @@ const chatCompletionsRoute = createApiRoute({
       chatCompletionResponseSchema,
       'Non-streaming chat completion.'
     ),
-    ...jsonErrorResponses([400, 401, 404, 500, 501]),
+    ...jsonErrorResponses([400, 401, 404, 500, 501, 502, 504]),
   },
   tag: 'Chat',
 });
@@ -46,27 +45,26 @@ export const registerChatRoutes = (
   app.openapi(chatCompletionsRoute, async (c) => {
     const body = c.req.valid('json');
 
-    try {
-      if (body.stream) {
-        return c.json(createNotImplementedStreamPayload(body.model), 501);
-      }
-
-      const result = await completeChat.execute(
-        {
-          maxTokens: body.max_tokens,
-          messages: mapMessages(body.messages),
-          model: body.model,
-          stream: false,
-          temperature: body.temperature,
-          tools: mapTools(body.tools),
-        },
-        c.req.raw.signal
+    if (body.stream) {
+      const binding = completeChat.resolveModel(body.model);
+      return c.json(
+        createNotImplementedStreamPayload(body.model, binding),
+        501
       );
-
-      return c.json(toOpenAiChatCompletion(body.model, result));
-    } catch (error) {
-      const mapped = toErrorResponse(error);
-      return c.json(mapped.error, mapped.statusCode);
     }
+
+    const result = await completeChat.execute(
+      {
+        maxTokens: body.max_tokens,
+        messages: mapMessages(body.messages),
+        model: body.model,
+        stream: false,
+        temperature: body.temperature,
+        tools: mapTools(body.tools),
+      },
+      c.req.raw.signal
+    );
+
+    return c.json(toOpenAiChatCompletion(result));
   });
 };

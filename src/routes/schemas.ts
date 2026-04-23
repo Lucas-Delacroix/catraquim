@@ -3,7 +3,13 @@ import { z } from '@hono/zod-openapi';
 export const errorResponseSchema = z
   .object({
     error: z.object({
+      canonical_model: z.string().optional(),
+      code: z.string().optional(),
+      details: z.record(z.string(), z.unknown()).optional(),
       message: z.string(),
+      provider: z.string().optional(),
+      requested_model: z.string().optional(),
+      transient: z.boolean().optional(),
       type: z.string(),
     }),
   })

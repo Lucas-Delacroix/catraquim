@@ -150,13 +150,24 @@ export const createApp = (context = createServerContext()) => {
 
   app.onError((error, c) => {
     if (error instanceof AppError) {
-      logger.warn({ err: error }, 'Request failed with application error');
+      logger.warn(
+        {
+          canonicalModel: error.canonicalModel,
+          code: error.code,
+          err: error,
+          provider: error.providerId,
+          requestedModel: error.requestedModel,
+          transient: error.transient,
+          type: error.type,
+        },
+        'Request failed with application error'
+      );
     } else {
       logger.error({ err: error }, 'Request failed with unexpected error');
     }
 
     const mapped = toErrorResponse(error);
-    return c.json(mapped.error, mapped.statusCode);
+    return c.json({ error: mapped.error }, mapped.statusCode);
   });
 
   return app;
@@ -171,7 +182,10 @@ export const startServer = (config = loadConfig()) => {
     {
       configFiles,
       host: config.server.host,
-      models: Object.keys(config.models),
+      models: Object.entries(config.models).map(([alias, definition]) => ({
+        alias,
+        canonicalRef: `${definition.adapter}/${definition.upstreamModel}`,
+      })),
       port: config.server.port,
     },
     'Starting catraquim'

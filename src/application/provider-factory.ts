@@ -11,9 +11,17 @@ export class ProviderFactory {
           case 'codex':
             return new CodexAdapter(providerId, providerConfig);
           default:
-            throw new AppError(
+            throw AppError.configuration(
               `Unsupported provider type: ${(providerConfig as { type: string }).type}`,
-              500
+              500,
+              undefined,
+              {
+                code: 'unsupported_provider_type',
+                details: {
+                  type: (providerConfig as { type: string }).type,
+                },
+                providerId,
+              }
             );
         }
       }

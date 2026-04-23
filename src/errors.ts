@@ -1,12 +1,122 @@
+export type AppErrorType =
+  | 'authentication_error'
+  | 'compatibility_error'
+  | 'configuration_error'
+  | 'gateway_error'
+  | 'provider_error'
+  | 'transient_error';
+
+export interface AppErrorMetadata {
+  canonicalModel?: string;
+  code?: string;
+  details?: Record<string, unknown>;
+  providerId?: string;
+  requestedModel?: string;
+  transient?: boolean;
+  type?: AppErrorType;
+}
+
 export class AppError extends Error {
   public readonly cause?: unknown;
+  public readonly canonicalModel?: string;
+  public readonly code?: string;
+  public readonly details?: Record<string, unknown>;
+  public readonly providerId?: string;
+  public readonly requestedModel?: string;
   public readonly statusCode: number;
+  public readonly transient: boolean;
+  public readonly type: AppErrorType;
 
-  public constructor(message: string, statusCode = 500, cause?: unknown) {
+  public constructor(
+    message: string,
+    statusCode = 500,
+    cause?: unknown,
+    metadata: AppErrorMetadata = {}
+  ) {
     super(message);
     this.name = 'AppError';
     this.statusCode = statusCode;
     this.cause = cause;
+    this.canonicalModel = metadata.canonicalModel;
+    this.code = metadata.code;
+    this.details = metadata.details;
+    this.providerId = metadata.providerId;
+    this.requestedModel = metadata.requestedModel;
+    this.transient = metadata.transient ?? false;
+    this.type = metadata.type ?? 'gateway_error';
+  }
+
+  public static authentication(
+    message: string,
+    statusCode = 401,
+    cause?: unknown,
+    metadata: AppErrorMetadata = {}
+  ) {
+    return new AppError(message, statusCode, cause, {
+      ...metadata,
+      type: 'authentication_error',
+    });
+  }
+
+  public static compatibility(
+    message: string,
+    statusCode = 400,
+    cause?: unknown,
+    metadata: AppErrorMetadata = {}
+  ) {
+    return new AppError(message, statusCode, cause, {
+      ...metadata,
+      type: 'compatibility_error',
+    });
+  }
+
+  public static configuration(
+    message: string,
+    statusCode = 500,
+    cause?: unknown,
+    metadata: AppErrorMetadata = {}
+  ) {
+    return new AppError(message, statusCode, cause, {
+      ...metadata,
+      type: 'configuration_error',
+    });
+  }
+
+  public static provider(
+    message: string,
+    statusCode = 502,
+    cause?: unknown,
+    metadata: AppErrorMetadata = {}
+  ) {
+    return new AppError(message, statusCode, cause, {
+      ...metadata,
+      type: 'provider_error',
+    });
+  }
+
+  public static transient(
+    message: string,
+    statusCode = 504,
+    cause?: unknown,
+    metadata: AppErrorMetadata = {}
+  ) {
+    return new AppError(message, statusCode, cause, {
+      ...metadata,
+      transient: true,
+      type: 'transient_error',
+    });
+  }
+
+  public static enrich(error: AppError, metadata: AppErrorMetadata = {}) {
+    return new AppError(error.message, error.statusCode, error.cause, {
+      canonicalModel: metadata.canonicalModel ?? error.canonicalModel,
+      code: metadata.code ?? error.code,
+      details: metadata.details ?? error.details,
+      providerId: metadata.providerId ?? error.providerId,
+      requestedModel: metadata.requestedModel ?? error.requestedModel,
+      transient: metadata.transient ?? error.transient,
+      type: metadata.type ?? error.type,
+    });
   }
 }
 
@@ -14,8 +124,18 @@ export const toErrorResponse = (error: unknown) => {
   if (error instanceof AppError) {
     return {
       error: {
+        ...(error.canonicalModel
+          ? { canonical_model: error.canonicalModel }
+          : {}),
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.details ? { details: error.details } : {}),
         message: error.message,
-        type: 'gateway_error',
+        ...(error.providerId ? { provider: error.providerId } : {}),
+        ...(error.requestedModel
+          ? { requested_model: error.requestedModel }
+          : {}),
+        transient: error.transient,
+        type: error.type,
       },
       statusCode: error.statusCode,
     };

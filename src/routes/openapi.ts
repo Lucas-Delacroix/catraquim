@@ -10,6 +10,8 @@ const errorResponseDescriptions = {
   404: 'Not found.',
   500: 'Internal server error.',
   501: 'Feature not implemented.',
+  502: 'Provider request failed.',
+  504: 'Provider request timed out.',
 } as const;
 
 type ErrorStatusCode = keyof typeof errorResponseDescriptions;

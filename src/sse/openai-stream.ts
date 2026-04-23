@@ -1,14 +1,12 @@
+import type { ModelBinding } from '../application/model-registry.js';
 import type { ChatCompletionResult } from '../usecases/complete-chat.js';
 
-export const toOpenAiChatCompletion = (
-  model: string,
-  completion: ChatCompletionResult
-) => {
+export const toOpenAiChatCompletion = (completion: ChatCompletionResult) => {
   return {
     id: 'chatcmpl_stub',
     object: 'chat.completion',
     created: Math.floor(Date.now() / 1000),
-    model,
+    model: completion.canonicalModel,
     choices: [
       {
         index: 0,
@@ -23,10 +21,16 @@ export const toOpenAiChatCompletion = (
   };
 };
 
-export const createNotImplementedStreamPayload = (model: string) => {
+export const createNotImplementedStreamPayload = (
+  requestedModel: string,
+  binding?: ModelBinding
+) => {
   return {
     error: {
-      message: `Streaming is not implemented yet for model "${model}"`,
+      ...(binding ? { canonical_model: binding.canonicalModel } : {}),
+      message: `Streaming is not implemented yet for model "${requestedModel}"`,
+      ...(binding ? { provider: binding.providerId } : {}),
+      requested_model: requestedModel,
       type: 'not_implemented',
     },
   };

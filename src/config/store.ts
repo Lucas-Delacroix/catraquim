@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { modelKey, parseModelRef } from '../application/model-ref.js';
 import { AppError } from '../errors.js';
 import { defaultConfig } from './defaults.js';
 import {
@@ -27,8 +28,50 @@ export const expandHome = (value: string) => {
 };
 
 export const normalizeConfigShape = (raw: Record<string, unknown>) => {
-  const { codex: legacyCodex, providers: rawProviders, ...rest } = raw;
+  const {
+    codex: legacyCodex,
+    models: rawModels,
+    providers: rawProviders,
+    ...rest
+  } = raw;
   const providers = isRecord(rawProviders) ? { ...rawProviders } : {};
+  const models = isRecord(rawModels) ? { ...rawModels } : {};
+
+  for (const [alias, modelValue] of Object.entries(models)) {
+    if (typeof modelValue === 'string') {
+      const parsed = parseModelRef(modelValue);
+      if (parsed) {
+        models[alias] = {
+          adapter: parsed.providerId,
+          upstreamModel: parsed.model,
+        };
+      }
+      continue;
+    }
+
+    if (!isRecord(modelValue)) {
+      continue;
+    }
+
+    const canonicalRef =
+      typeof modelValue.canonicalRef === 'string'
+        ? modelValue.canonicalRef
+        : typeof modelValue.providerModel === 'string'
+          ? modelValue.providerModel
+          : undefined;
+
+    if (!canonicalRef) {
+      continue;
+    }
+
+    const parsed = parseModelRef(canonicalRef);
+    if (parsed) {
+      models[alias] = {
+        adapter: parsed.providerId,
+        upstreamModel: parsed.model,
+      };
+    }
+  }
 
   if (!('codex' in providers) && isRecord(legacyCodex)) {
     providers.codex = legacyCodex;
@@ -63,6 +106,7 @@ export const normalizeConfigShape = (raw: Record<string, unknown>) => {
 
   return {
     ...rest,
+    models,
     providers,
   };
 };
@@ -151,7 +195,19 @@ export const ensureConfigDirectory = (filePath: string) => {
 };
 
 export const serializeConfig = (config: AppConfig) =>
-  `${JSON.stringify(config, null, 2)}\n`;
+  `${JSON.stringify(
+    {
+      ...config,
+      models: Object.fromEntries(
+        Object.entries(config.models).map(([alias, definition]) => [
+          alias,
+          modelKey(definition.adapter, definition.upstreamModel),
+        ])
+      ),
+    },
+    null,
+    2
+  )}\n`;
 
 export const writeConfigFile = (filePath: string, config: AppConfig) => {
   ensureConfigDirectory(filePath);

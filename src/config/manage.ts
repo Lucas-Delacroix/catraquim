@@ -133,6 +133,40 @@ const parsePort = (value: string) => {
   return port;
 };
 
+const parseCanonicalModelInput = (value: string, providerId: string) => {
+  const trimmed = value.trim();
+  if (trimmed === '') {
+    throw new AppError('Model reference cannot be empty', 400);
+  }
+
+  const slashIndex = trimmed.indexOf('/');
+  if (slashIndex === -1) {
+    return {
+      providerId,
+      upstreamModel: trimmed,
+    };
+  }
+
+  const parsedProviderId = trimmed.slice(0, slashIndex).trim();
+  const upstreamModel = trimmed.slice(slashIndex + 1).trim();
+
+  if (!parsedProviderId || !upstreamModel) {
+    throw new AppError(`Invalid canonical model "${value}"`, 400);
+  }
+
+  if (parsedProviderId !== providerId) {
+    throw new AppError(
+      `Canonical model "${value}" must use provider "${providerId}"`,
+      400
+    );
+  }
+
+  return {
+    providerId: parsedProviderId,
+    upstreamModel,
+  };
+};
+
 const createPromptApi = (
   input: NodeJS.ReadableStream = process.stdin,
   output: NodeJS.WritableStream = process.stdout
@@ -236,9 +270,9 @@ export const setupConfig = async ({
       'Primary model alias',
       firstModel[0]
     );
-    const primaryUpstream = await prompts.ask(
-      'Primary upstream model',
-      firstModel[1].upstreamModel
+    const primaryCanonicalModel = await prompts.ask(
+      'Primary canonical model',
+      `${providerId}/${firstModel[1].upstreamModel}`
     );
     const includeSecondModel = await prompts.confirm(
       'Configure a second model',
@@ -246,19 +280,24 @@ export const setupConfig = async ({
     );
 
     let secondAlias = '';
-    let secondUpstream = '';
+    let secondCanonicalModel = '';
     if (includeSecondModel) {
       secondAlias = await prompts.ask('Second model alias', secondModel[0]);
-      secondUpstream = await prompts.ask(
-        'Second upstream model',
-        secondModel[1].upstreamModel
+      secondCanonicalModel = await prompts.ask(
+        'Second canonical model',
+        `${providerId}/${secondModel[1].upstreamModel}`
       );
     }
 
+    const primaryBinding = parseCanonicalModelInput(
+      primaryCanonicalModel,
+      providerId
+    );
+
     const models: AppConfig['models'] = {
       [primaryAlias]: {
-        adapter: providerId,
-        upstreamModel: primaryUpstream,
+        adapter: primaryBinding.providerId,
+        upstreamModel: primaryBinding.upstreamModel,
       },
     };
 
@@ -267,9 +306,14 @@ export const setupConfig = async ({
         throw new AppError('Model aliases must be different', 400);
       }
 
+      const secondBinding = parseCanonicalModelInput(
+        secondCanonicalModel,
+        providerId
+      );
+
       models[secondAlias] = {
-        adapter: providerId,
-        upstreamModel: secondUpstream,
+        adapter: secondBinding.providerId,
+        upstreamModel: secondBinding.upstreamModel,
       };
     }
 

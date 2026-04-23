@@ -49,21 +49,32 @@ function extractTurnErrorMessage(error: unknown): string | undefined {
 
 function errorForTurnStatus(turn: CodexTurn): AppError {
   if (turn.status === 'failed') {
-    return new AppError(
+    return AppError.provider(
       extractTurnErrorMessage(turn.error) ?? 'Codex turn failed',
-      400,
-      turn.error
+      502,
+      turn.error,
+      {
+        code: 'turn_failed',
+      }
     );
   }
 
   if (turn.status === 'interrupted') {
-    return new AppError('Codex turn interrupted', 499, turn.error);
+    return AppError.transient('Codex turn interrupted', 499, turn.error, {
+      code: 'turn_interrupted',
+    });
   }
 
-  return new AppError(
+  return AppError.provider(
     `Unexpected Codex turn status: ${turn.status}`,
     502,
-    turn
+    turn,
+    {
+      code: 'unexpected_turn_status',
+      details: {
+        status: turn.status,
+      },
+    }
   );
 }
 
@@ -211,7 +222,11 @@ export async function runTurn(
     const handleAbort = () => {
       removeListener();
       client.notify('turn/interrupt', { threadId, turnId }).catch(() => {});
-      reject(new AppError('Turn aborted', 499));
+      reject(
+        AppError.transient('Turn aborted', 499, undefined, {
+          code: 'turn_aborted',
+        })
+      );
     };
 
     if (signal.aborted) {

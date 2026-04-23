@@ -72,9 +72,17 @@ export class CodexAppServerClient {
     const version = userAgent ? parseVersion(userAgent) : null;
 
     if (version && !versionAtLeast(version, MIN_SERVER_VERSION)) {
-      throw new AppError(
+      throw AppError.compatibility(
         `Codex app-server version too old (${userAgent}); need >= ${MIN_SERVER_VERSION.join('.')}`,
-        502
+        502,
+        undefined,
+        {
+          code: 'app_server_version_too_old',
+          details: {
+            minimumVersion: MIN_SERVER_VERSION.join('.'),
+            userAgent,
+          },
+        }
       );
     }
 

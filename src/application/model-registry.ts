@@ -4,6 +4,7 @@ import { modelKey, parseModelRef } from './model-ref.js';
 import { ProviderModelCatalog } from './provider-model-catalog.js';
 
 export interface ModelBinding {
+  canonicalModel: string;
   gatewayModel: string;
   providerId: string;
   upstreamModel: string;
@@ -41,6 +42,7 @@ export class ModelRegistry {
     const definition = this.models[model];
     if (definition) {
       return {
+        canonicalModel: modelKey(definition.adapter, definition.upstreamModel),
         gatewayModel: model,
         providerId: definition.adapter,
         upstreamModel: definition.upstreamModel,
@@ -54,13 +56,17 @@ export class ModelRegistry {
       this.providerModelCatalog.has(directRef.providerId, directRef.model)
     ) {
       return {
+        canonicalModel: modelKey(directRef.providerId, directRef.model),
         gatewayModel: model,
         providerId: directRef.providerId,
         upstreamModel: directRef.model,
       };
     }
 
-    throw new AppError(`Unknown model: ${model}`, 400);
+    throw AppError.compatibility(`Unknown model: ${model}`, 400, undefined, {
+      code: 'unknown_model',
+      requestedModel: model,
+    });
   }
 
   public hasProvider(providerId: string): boolean {

@@ -76,7 +76,14 @@ export class CodexRpcTransport {
     const stderr = this.proc.stderr;
 
     if (!stdin || !stdout || !stderr) {
-      throw new AppError('Codex app-server stdio pipes are unavailable', 502);
+      throw AppError.provider(
+        'Codex app-server stdio pipes are unavailable',
+        502,
+        undefined,
+        {
+          code: 'stdio_unavailable',
+        }
+      );
     }
 
     stdin.on('error', (error) => {
@@ -93,15 +100,49 @@ export class CodexRpcTransport {
       );
     });
 
+    this.proc.once('error', (error) => {
+      logger.warn({ err: error }, 'codex app-server process error');
+
+      for (const [id, pending] of this.pendingRequests) {
+        clearTimeout(pending.timer);
+        pending.reject(
+          (error as NodeJS.ErrnoException).code === 'ENOENT'
+            ? AppError.configuration(
+                `Codex binary not found: ${this.config.binary}`,
+                500,
+                error,
+                {
+                  code: 'binary_not_found',
+                  details: {
+                    binary: this.config.binary,
+                  },
+                }
+              )
+            : AppError.transient('Codex app-server process error', 502, error, {
+                code: 'process_error',
+              })
+        );
+        this.pendingRequests.delete(id);
+      }
+    });
+
     this.proc.once('exit', (code, signal) => {
       logger.warn({ code, signal }, 'codex app-server exited');
 
       for (const [id, pending] of this.pendingRequests) {
         clearTimeout(pending.timer);
         pending.reject(
-          new AppError(
+          AppError.transient(
             `Codex app-server exited (code=${code ?? 'null'} signal=${signal ?? 'null'})`,
-            502
+            502,
+            undefined,
+            {
+              code: 'app_server_exited',
+              details: {
+                code,
+                signal,
+              },
+            }
           )
         );
         this.pendingRequests.delete(id);
@@ -144,9 +185,16 @@ export class CodexRpcTransport {
 
       if (msg.error) {
         pending.reject(
-          new AppError(
+          AppError.provider(
             `Codex RPC error on request ${msg.id}: ${msg.error.message}`,
-            502
+            502,
+            msg.error,
+            {
+              code: 'rpc_error',
+              details: {
+                rpcCode: msg.error.code,
+              },
+            }
           )
         );
       } else {
@@ -189,14 +237,27 @@ export class CodexRpcTransport {
 
     return new Promise((resolve, reject) => {
       if (opts?.signal?.aborted) {
-        reject(new AppError(`Codex RPC aborted: ${method}`, 499));
+        reject(
+          AppError.transient(`Codex RPC aborted: ${method}`, 499, undefined, {
+            code: 'rpc_aborted',
+          })
+        );
         return;
       }
 
       const timer = opts?.timeoutMs
         ? setTimeout(() => {
             this.pendingRequests.delete(id);
-            reject(new AppError(`Codex RPC timeout: ${method}`, 504));
+            reject(
+              AppError.transient(
+                `Codex RPC timeout: ${method}`,
+                504,
+                undefined,
+                {
+                  code: 'rpc_timeout',
+                }
+              )
+            );
           }, opts.timeoutMs)
         : undefined;
 
@@ -208,7 +269,11 @@ export class CodexRpcTransport {
           if (!this.pendingRequests.has(id)) return;
           this.pendingRequests.delete(id);
           clearTimeout(timer);
-          reject(new AppError(`Codex RPC aborted: ${method}`, 499));
+          reject(
+            AppError.transient(`Codex RPC aborted: ${method}`, 499, undefined, {
+              code: 'rpc_aborted',
+            })
+          );
         },
         { once: true }
       );
@@ -219,10 +284,13 @@ export class CodexRpcTransport {
           this.pendingRequests.delete(id);
           clearTimeout(timer);
           reject(
-            new AppError(
+            AppError.transient(
               `Failed to write to Codex app-server stdin: ${method}`,
               502,
-              error
+              error,
+              {
+                code: 'stdin_write_failed',
+              }
             )
           );
         }

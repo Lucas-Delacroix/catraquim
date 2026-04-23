@@ -128,6 +128,14 @@ describe('CLI', () => {
           }),
         },
       ],
+      getProviderStatuses: {
+        execute: vi.fn().mockResolvedValue({
+          codex: {
+            expiresAt: '2026-05-01T00:00:00Z',
+            ok: true,
+          },
+        }),
+      },
     });
 
     await run(['auth:status']);

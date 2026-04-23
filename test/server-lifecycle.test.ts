@@ -6,21 +6,15 @@ import { defaultConfig } from '../src/config/defaults.js';
 
 const mockServe = vi.fn();
 const shutdownSpy = vi.fn();
+const createProvidersMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@hono/node-server', () => ({
   serve: mockServe,
 }));
 
-vi.mock('../src/adapters/codex/index.js', () => ({
-  CodexAdapter: vi.fn().mockImplementation(() => ({
-    chat: async function* () {},
-    id: 'codex',
-    shutdown: shutdownSpy,
-    status: async () => ({
-      id: 'codex',
-      ok: true,
-    }),
-    supports: () => true,
+vi.mock('../src/application/provider-factory.js', () => ({
+  ProviderFactory: vi.fn().mockImplementation(() => ({
+    create: createProvidersMock,
   })),
 }));
 
@@ -41,6 +35,17 @@ describe('startServer lifecycle', () => {
   it('shuts down adapters and closes the HTTP server on SIGTERM', async () => {
     const server = new MockServer();
     mockServe.mockReturnValue(server);
+    createProvidersMock.mockReturnValue([
+      {
+        chat: async function* () {},
+        id: 'codex',
+        shutdown: shutdownSpy,
+        status: async () => ({
+          id: 'codex',
+          ok: true,
+        }),
+      },
+    ]);
 
     const { startServer } = await import('../src/server.js');
 

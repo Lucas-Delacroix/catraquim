@@ -4,20 +4,17 @@ import type {
   Adapter,
   AdapterStatus,
   ChatChunk,
-  ChatRequest,
+  ResolvedChatRequest,
 } from '../../src/adapters/base.js';
-import { ChatService } from '../../src/services/chat.js';
-import { ServiceRouter } from '../../src/services/router.js';
+import { ModelRegistry } from '../../src/application/model-registry.js';
+import { defaultConfig } from '../../src/config/defaults.js';
+import { CompleteChatUseCase } from '../../src/usecases/complete-chat.js';
 
 class FakeAdapter implements Adapter {
   public readonly id = 'fake';
 
-  public supports(model: string): boolean {
-    return model === 'test-model';
-  }
-
   public async *chat(
-    _req: ChatRequest,
+    _req: ResolvedChatRequest,
     _signal: AbortSignal
   ): AsyncIterable<ChatChunk> {
     yield { delta: 'hello ' };
@@ -32,12 +29,28 @@ class FakeAdapter implements Adapter {
   }
 }
 
-describe('ChatService', () => {
+describe('CompleteChatUseCase', () => {
   it('aggregates chunks for non-streaming responses', async () => {
-    const router = new ServiceRouter([new FakeAdapter()]);
-    const service = new ChatService(router);
+    const registry = new ModelRegistry(
+      {
+        ...defaultConfig.models,
+        'test-model': {
+          adapter: 'fake',
+          upstreamModel: 'fake-upstream',
+        },
+      },
+      {
+        ...defaultConfig.providers,
+        fake: {
+          type: 'codex',
+          binary: 'fake',
+          homePath: '~/.fake',
+        },
+      }
+    );
+    const useCase = new CompleteChatUseCase(registry, [new FakeAdapter()]);
 
-    const result = await service.complete(
+    const result = await useCase.execute(
       {
         messages: [{ content: 'hi', role: 'user' }],
         model: 'test-model',
@@ -48,5 +61,67 @@ describe('ChatService', () => {
 
     expect(result.content).toBe('hello world');
     expect(result.finishReason).toBe('stop');
+  });
+
+  it('resolves direct provider/model refs without a configured alias', async () => {
+    const seen: ResolvedChatRequest[] = [];
+
+    class TrackingAdapter extends FakeAdapter {
+      public override async *chat(
+        req: ResolvedChatRequest,
+        signal: AbortSignal
+      ): AsyncIterable<ChatChunk> {
+        seen.push(req);
+        yield* super.chat(req, signal);
+      }
+    }
+
+    const registry = new ModelRegistry(defaultConfig.models, {
+      ...defaultConfig.providers,
+      fake: {
+        type: 'codex',
+        binary: 'fake',
+        homePath: '~/.fake',
+      },
+    });
+    const useCase = new CompleteChatUseCase(registry, [new TrackingAdapter()]);
+
+    await useCase.execute(
+      {
+        messages: [{ content: 'hi', role: 'user' }],
+        model: 'fake/gpt-5.4',
+        stream: false,
+      },
+      new AbortController().signal
+    );
+
+    expect(seen[0]).toMatchObject({
+      model: 'fake/gpt-5.4',
+      providerId: 'fake',
+      upstreamModel: 'gpt-5.4',
+    });
+  });
+
+  it('rejects direct provider/model refs that are not in the provider catalog', async () => {
+    const registry = new ModelRegistry(defaultConfig.models, {
+      ...defaultConfig.providers,
+      fake: {
+        type: 'codex',
+        binary: 'fake',
+        homePath: '~/.fake',
+      },
+    });
+    const useCase = new CompleteChatUseCase(registry, [new FakeAdapter()]);
+
+    await expect(
+      useCase.execute(
+        {
+          messages: [{ content: 'hi', role: 'user' }],
+          model: 'fake/not-in-catalog',
+          stream: false,
+        },
+        new AbortController().signal
+      )
+    ).rejects.toThrow('Unknown model: fake/not-in-catalog');
   });
 });

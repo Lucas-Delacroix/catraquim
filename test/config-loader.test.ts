@@ -107,6 +107,7 @@ describe('config loader', () => {
     const config = loadConfig();
 
     expect(config.providers.codex).toEqual({
+      type: 'codex',
       binary: 'custom-codex',
       homePath: expect.stringContaining('legacy-codex'),
     });

@@ -107,6 +107,7 @@ describe('config management', () => {
           .mockResolvedValueOnce('5151')
           .mockResolvedValueOnce('')
           .mockResolvedValueOnce('codex')
+          .mockResolvedValueOnce('codex')
           .mockResolvedValueOnce('~/.codex')
           .mockResolvedValueOnce('gpt-5')
           .mockResolvedValueOnce('codex-max')
@@ -138,6 +139,7 @@ describe('config management', () => {
       },
       providers: {
         codex: {
+          type: 'codex',
           binary: 'codex',
           homePath: '~/.codex',
         },
@@ -161,6 +163,7 @@ describe('config management', () => {
           .mockResolvedValueOnce('127.0.0.1')
           .mockResolvedValueOnce('4141')
           .mockResolvedValueOnce('')
+          .mockResolvedValueOnce('codex')
           .mockResolvedValueOnce('codex')
           .mockResolvedValueOnce('~/.codex')
           .mockResolvedValueOnce('codex-max')

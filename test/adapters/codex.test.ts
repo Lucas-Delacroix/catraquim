@@ -88,7 +88,7 @@ function createPair() {
     }
   });
 
-  const client = new CodexAppServerClient(defaultConfig);
+  const client = new CodexAppServerClient(defaultConfig.providers.codex);
   return { client, server };
 }
 
@@ -574,17 +574,10 @@ describe('runTurn – thread/start → turn/start → turn/completed', () => {
 });
 
 // ---------------------------------------------------------------------------
-// CodexAdapter.supports
+// CodexAdapter
 // ---------------------------------------------------------------------------
 
 describe('CodexAdapter', () => {
-  it('supports models mapped to codex in config', () => {
-    const adapter = new CodexAdapter(defaultConfig);
-    expect(adapter.supports('codex-max')).toBe(true);
-    expect(adapter.supports('codex-mini')).toBe(true);
-    expect(adapter.supports('missing-model')).toBe(false);
-  });
-
   it('reads auth status from the configured source codex home', async () => {
     const authSpy = vi
       .spyOn(codexCredentials, 'getCodexAuthStatus')
@@ -593,15 +586,9 @@ describe('CodexAdapter', () => {
         ok: true,
       });
 
-    const adapter = new CodexAdapter({
-      ...defaultConfig,
-      providers: {
-        ...defaultConfig.providers,
-        codex: {
-          ...defaultConfig.providers.codex,
-          homePath: '~/source-codex-home',
-        },
-      },
+    const adapter = new CodexAdapter('codex', {
+      ...defaultConfig.providers.codex,
+      homePath: '~/source-codex-home',
     });
 
     await expect(adapter.status()).resolves.toEqual({

@@ -5,6 +5,7 @@ import { PassThrough } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CodexAppServerClient } from '../../src/adapters/codex/app-server.js';
+import { prepareCodexHome } from '../../src/adapters/codex/auth-bridge.js';
 import { CodexAdapter } from '../../src/adapters/codex/index.js';
 import { runTurn } from '../../src/adapters/codex/run-turn.js';
 import {
@@ -13,6 +14,7 @@ import {
   isRpcResponse,
 } from '../../src/adapters/codex/types.js';
 import { defaultConfig } from '../../src/config/defaults.js';
+import * as codexCredentials from '../../src/credentials/codex.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 vi.mock('../../src/adapters/codex/auth-bridge.js', () => ({
@@ -72,10 +74,12 @@ class MockCodexServer extends EventEmitter {
 }
 
 const mockSpawn = spawn as ReturnType<typeof vi.fn>;
+const mockPrepareCodexHome = prepareCodexHome as ReturnType<typeof vi.fn>;
 
 function createPair() {
   const server = new MockCodexServer();
   mockSpawn.mockReturnValue(server);
+  mockPrepareCodexHome.mockReturnValue('/tmp/mock-codex-home');
 
   // userAgent format: "<originator>/<semver>", version must be >= 0.118.0
   server.onMessage((msg) => {
@@ -155,6 +159,28 @@ describe('CodexAppServerClient – request/response correlation', () => {
 
     const result = await client.request('thread/start', { model: 'gpt-5' });
     expect(result).toEqual({ thread: { id: 'thread-abc' } });
+  });
+
+  it('removes OPENAI_API_KEY from child env explicitly', async () => {
+    vi.resetAllMocks();
+    process.env.OPENAI_API_KEY = 'host-secret';
+
+    const { client, server } = createPair();
+    server.onMessage((msg) => {
+      if (msg.method === 'ping') {
+        server.respond(msg.id as number, {});
+      }
+    });
+
+    await client.request('ping', {});
+
+    const spawnCall = mockSpawn.mock.calls.at(0);
+    const options = spawnCall?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
+
+    expect(options?.env?.CODEX_HOME).toBe('/tmp/mock-codex-home');
+    expect('OPENAI_API_KEY' in (options?.env ?? {})).toBe(false);
+
+    process.env.OPENAI_API_KEY = undefined;
   });
 
   it('rejects on RPC error response', async () => {
@@ -293,6 +319,140 @@ describe('runTurn – thread/start → turn/start → turn/completed', () => {
     expect(result.text).toBe('Instant reply');
   });
 
+  it('extracts nested text parts from agentMessage content arrays', async () => {
+    const { client, server } = createPair();
+
+    server.onMessage((msg) => {
+      if (msg.method === 'thread/start') {
+        server.respond(msg.id as number, { thread: { id: 'tid-nested' } });
+      }
+      if (msg.method === 'turn/start') {
+        server.respond(msg.id as number, {
+          turn: {
+            id: 'turn-nested',
+            status: 'completed',
+            items: [
+              {
+                type: 'agentMessage',
+                content: [
+                  { type: 'output_text', text: 'Nested ' },
+                  { type: 'output_text', text: 'reply' },
+                ],
+              },
+            ],
+          },
+        });
+      }
+    });
+
+    const result = await runTurn(
+      client,
+      { model: 'gpt-5', modelProvider: 'openai' },
+      { approvalPolicy: 'never', model: 'gpt-5' },
+      new AbortController().signal
+    );
+
+    expect(result.text).toBe('Nested reply');
+  });
+
+  it('rejects when turn/start returns status failed', async () => {
+    const { client, server } = createPair();
+
+    server.onMessage((msg) => {
+      if (msg.method === 'thread/start') {
+        server.respond(msg.id as number, { thread: { id: 'tid-failed' } });
+      }
+      if (msg.method === 'turn/start') {
+        server.respond(msg.id as number, {
+          turn: {
+            id: 'turn-failed',
+            status: 'failed',
+            error: {
+              message:
+                '{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"Model not supported"}}',
+            },
+            items: [],
+          },
+        });
+      }
+    });
+
+    await expect(
+      runTurn(
+        client,
+        { model: 'gpt-5', modelProvider: 'openai' },
+        { approvalPolicy: 'never', model: 'gpt-5' },
+        new AbortController().signal
+      )
+    ).rejects.toThrow('Model not supported');
+  });
+
+  it('rejects when turn/completed reports failed status', async () => {
+    const { client, server } = createPair();
+
+    server.onMessage((msg) => {
+      if (msg.method === 'thread/start') {
+        server.respond(msg.id as number, {
+          thread: { id: 'tid-failed-notify' },
+        });
+      }
+      if (msg.method === 'turn/start') {
+        server.respond(msg.id as number, {
+          turn: { id: 'turn-failed-notify', status: 'running' },
+        });
+        setTimeout(() => {
+          server.sendNotification('turn/completed', {
+            threadId: 'tid-failed-notify',
+            turnId: 'turn-failed-notify',
+            turn: {
+              id: 'turn-failed-notify',
+              status: 'failed',
+              error: { message: 'Upstream failed' },
+              items: [],
+            },
+          });
+        }, 10);
+      }
+    });
+
+    await expect(
+      runTurn(
+        client,
+        { model: 'gpt-5', modelProvider: 'openai' },
+        { approvalPolicy: 'never', model: 'gpt-5' },
+        new AbortController().signal
+      )
+    ).rejects.toThrow('Upstream failed');
+  });
+
+  it('rejects when turn/start returns status interrupted', async () => {
+    const { client, server } = createPair();
+
+    server.onMessage((msg) => {
+      if (msg.method === 'thread/start') {
+        server.respond(msg.id as number, { thread: { id: 'tid-interrupted' } });
+      }
+      if (msg.method === 'turn/start') {
+        server.respond(msg.id as number, {
+          turn: {
+            id: 'turn-interrupted',
+            status: 'interrupted',
+            items: [],
+          },
+        });
+      }
+    });
+
+    await expect(
+      runTurn(
+        client,
+        { model: 'gpt-5', modelProvider: 'openai' },
+        { approvalPolicy: 'never', model: 'gpt-5' },
+        new AbortController().signal
+      )
+    ).rejects.toThrow('Codex turn interrupted');
+  });
+
   it('ignores turn/completed for a different threadId', async () => {
     const { client, server } = createPair();
 
@@ -420,7 +580,33 @@ describe('runTurn – thread/start → turn/start → turn/completed', () => {
 describe('CodexAdapter', () => {
   it('supports models mapped to codex in config', () => {
     const adapter = new CodexAdapter(defaultConfig);
-    expect(adapter.supports('gpt-5')).toBe(true);
+    expect(adapter.supports('codex-max')).toBe(true);
+    expect(adapter.supports('codex-mini')).toBe(true);
     expect(adapter.supports('missing-model')).toBe(false);
+  });
+
+  it('reads auth status from the configured source codex home', async () => {
+    const authSpy = vi
+      .spyOn(codexCredentials, 'getCodexAuthStatus')
+      .mockResolvedValue({
+        expiresAt: '2026-01-01T00:00:00Z',
+        ok: true,
+      });
+
+    const adapter = new CodexAdapter({
+      ...defaultConfig,
+      codex: {
+        ...defaultConfig.codex,
+        codexHomeSource: '~/source-codex-home',
+      },
+    });
+
+    await expect(adapter.status()).resolves.toEqual({
+      expiresAt: '2026-01-01T00:00:00Z',
+      id: 'codex',
+      message: undefined,
+      ok: true,
+    });
+    expect(authSpy).toHaveBeenCalledWith('~/source-codex-home');
   });
 });

@@ -1,10 +1,6 @@
 import type { AppConfig } from './schema.js';
 
 export const defaultConfig: AppConfig = {
-  codex: {
-    binary: 'codex',
-    codexHomeSource: '~/.codex',
-  },
   models: {
     'codex-max': {
       adapter: 'codex',
@@ -13,6 +9,12 @@ export const defaultConfig: AppConfig = {
     'codex-mini': {
       adapter: 'codex',
       upstreamModel: 'codex-mini',
+    },
+  },
+  providers: {
+    codex: {
+      binary: 'codex',
+      homePath: '~/.codex',
     },
   },
   server: {

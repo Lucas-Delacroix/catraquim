@@ -19,21 +19,53 @@ const expandHome = (value: string) => {
   return value;
 };
 
-const configPath = () => join(homedir(), '.config', 'catraquim', 'config.json');
+const homeConfigPath = () =>
+  join(homedir(), '.config', 'catraquim', 'config.json');
 
-const readUserConfig = (): Partial<AppConfig> => {
-  const filePath = configPath();
+const localConfigPath = () => join(process.cwd(), 'config.json');
 
-  if (!existsSync(filePath)) {
-    return {};
+const explicitConfigPath = () => {
+  const value = process.env.CATRAQUIM_CONFIG;
+  if (!value) {
+    return null;
   }
 
+  return expandHome(value);
+};
+
+const configPaths = () => {
+  const explicit = explicitConfigPath();
+  return explicit
+    ? [explicit]
+    : [homeConfigPath(), localConfigPath()].filter((path, index, paths) => {
+        return paths.indexOf(path) === index;
+      });
+};
+
+const readConfigFile = (filePath: string): Partial<AppConfig> => {
   try {
     const raw = readFileSync(filePath, 'utf8');
     return JSON.parse(raw) as Partial<AppConfig>;
   } catch (error) {
     throw new AppError(`Failed to load config file at ${filePath}`, 500, error);
   }
+};
+
+const readUserConfig = (): Partial<AppConfig> => {
+  let mergedConfig: Partial<AppConfig> = {};
+
+  for (const filePath of configPaths()) {
+    if (!existsSync(filePath)) {
+      continue;
+    }
+
+    mergedConfig = mergeConfig(
+      mergeConfig(defaultConfig, mergedConfig),
+      readConfigFile(filePath)
+    );
+  }
+
+  return mergedConfig;
 };
 
 const mergeConfig = (
@@ -74,4 +106,5 @@ export const loadConfig = (): AppConfig => {
   return appConfigSchema.parse(envAdjusted);
 };
 
-export { configPath };
+export const resolvedConfigPaths = () => configPaths().filter(existsSync);
+export { homeConfigPath, localConfigPath };

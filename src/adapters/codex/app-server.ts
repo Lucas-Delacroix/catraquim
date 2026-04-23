@@ -1,106 +1,234 @@
-import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { type ChildProcess, spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 
 import type { AppConfig } from '../../config/schema.js';
 import { AppError } from '../../errors.js';
 import { logger } from '../../logger.js';
 import { prepareCodexHome } from './auth-bridge.js';
-import type { CodexRpcRequest, CodexRpcResponse } from './types.js';
+import {
+  isRpcNotification,
+  isRpcRequest,
+  isRpcResponse,
+  type CodexRpcNotificationMessage,
+} from './types.js';
+
+interface PendingRequest {
+  resolve: (result: unknown) => void;
+  reject: (error: Error) => void;
+  timer?: ReturnType<typeof setTimeout>;
+}
+
+const SERVER_REQUEST_DEFAULTS: Record<string, unknown> = {
+  'item/commandExecution/requestApproval': { decision: 'decline' },
+  'item/fileChange/requestApproval': { decision: 'decline' },
+  'item/permissions/requestApproval': { decision: 'decline' },
+  'item/tool/call': { contentItems: [], success: false },
+  'item/tool/requestUserInput': { answers: {} },
+  'mcpServer/elicitation/request': { action: 'decline' },
+};
 
 export class CodexAppServerClient {
   private nextId = 1;
-  private processRef?: ChildProcessWithoutNullStreams;
+  private proc?: ChildProcess;
+  private pendingRequests = new Map<number, PendingRequest>();
+  private notificationHandlers: Array<
+    (msg: CodexRpcNotificationMessage) => void
+  > = [];
+  private initialized = false;
+  private initializingPromise?: Promise<void>;
 
   public constructor(private readonly config: AppConfig) {}
 
-  public ensureStarted() {
-    if (this.processRef && !this.processRef.killed) {
-      return this.processRef;
-    }
+  private spawnProcess() {
+    if (this.proc && !this.proc.killed) return;
 
     const codexHome = prepareCodexHome();
+    const isWindows = process.platform === 'win32';
 
-    this.processRef = spawn(this.config.codex.binary, ['app-server'], {
-      env: {
-        ...process.env,
-        CODEX_HOME: codexHome,
-        OPENAI_API_KEY: '',
-      },
-      stdio: 'pipe',
+    this.proc = spawn(
+      this.config.codex.binary,
+      ['app-server', '--listen', 'stdio://'],
+      {
+        detached: !isWindows,
+        env: {
+          ...process.env,
+          CODEX_HOME: codexHome,
+          OPENAI_API_KEY: '',
+        },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }
+    );
+
+    const rl = createInterface({ input: this.proc.stdout! });
+    rl.on('line', (line) => this.handleLine(line));
+
+    this.proc.stderr!.on('data', (chunk: Buffer) => {
+      logger.debug({ chunk: chunk.toString('utf8') }, 'codex app-server stderr');
     });
 
-    this.processRef.once('exit', (code, signal) => {
-      logger.warn({ code, signal }, 'Codex app-server exited');
-      this.processRef = undefined;
-    });
+    this.proc.once('exit', (code, signal) => {
+      logger.warn({ code, signal }, 'codex app-server exited');
 
-    this.processRef.stderr.on('data', (chunk) => {
-      logger.debug(
-        { chunk: chunk.toString('utf8') },
-        'Codex app-server stderr'
-      );
-    });
+      for (const [id, pending] of this.pendingRequests) {
+        clearTimeout(pending.timer);
+        pending.reject(
+          new AppError('Codex app-server exited while waiting for response', 502)
+        );
+        this.pendingRequests.delete(id);
+      }
 
-    return this.processRef;
+      this.proc = undefined;
+      this.initialized = false;
+      this.initializingPromise = undefined;
+    });
   }
 
-  public async request(
-    method: string,
-    params?: Record<string, unknown>
-  ): Promise<CodexRpcResponse> {
-    const processRef = this.ensureStarted();
-    const payload: CodexRpcRequest = {
-      id: this.nextId++,
-      jsonrpc: '2.0',
-      method,
-      params,
+  private handleLine(line: string) {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+
+    let msg: unknown;
+    try {
+      msg = JSON.parse(trimmed);
+    } catch {
+      logger.warn({ line: trimmed }, 'Failed to parse codex message');
+      return;
+    }
+
+    if (isRpcResponse(msg)) {
+      const pending = this.pendingRequests.get(msg.id);
+      if (!pending) return;
+
+      this.pendingRequests.delete(msg.id);
+      clearTimeout(pending.timer);
+
+      if (msg.error) {
+        pending.reject(
+          new AppError(
+            `Codex RPC error on request ${msg.id}: ${msg.error.message}`,
+            502
+          )
+        );
+      } else {
+        pending.resolve(msg.result);
+      }
+    } else if (isRpcRequest(msg)) {
+      this.handleServerRequest(msg.id, msg.method);
+    } else if (isRpcNotification(msg)) {
+      for (const handler of [...this.notificationHandlers]) {
+        handler(msg);
+      }
+    }
+  }
+
+  private handleServerRequest(id: number, method: string) {
+    const result = SERVER_REQUEST_DEFAULTS[method] ?? {};
+    this.sendRaw(JSON.stringify({ id, result }));
+  }
+
+  private sendRaw(line: string) {
+    this.proc?.stdin?.write(`${line}\n`, 'utf8', (error) => {
+      if (error) {
+        logger.warn({ error }, 'Failed to write to codex app-server stdin');
+      }
+    });
+  }
+
+  public onNotification(
+    handler: (msg: CodexRpcNotificationMessage) => void
+  ): () => void {
+    this.notificationHandlers.push(handler);
+    return () => {
+      this.notificationHandlers = this.notificationHandlers.filter(
+        (h) => h !== handler
+      );
     };
+  }
 
-    return new Promise<CodexRpcResponse>((resolve, reject) => {
-      const onData = (chunk: Buffer) => {
-        const line = chunk.toString('utf8').trim();
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
+    if (!this.initializingPromise) {
+      this.initializingPromise = this.runInitialize();
+    }
+    await this.initializingPromise;
+  }
 
-        if (!line) {
-          return;
-        }
+  private async runInitialize(): Promise<void> {
+    this.spawnProcess();
 
-        try {
-          const parsed = JSON.parse(line) as CodexRpcResponse;
+    const result = await this.rawRequest('initialize', {
+      capabilities: { experimentalApi: true },
+      clientInfo: { name: 'catraquim', version: '0.1.0' },
+    });
 
-          if (parsed.id !== payload.id) {
-            return;
-          }
+    logger.debug({ result }, 'codex app-server initialized');
 
-          processRef.stdout.off('data', onData);
-          resolve(parsed);
-        } catch (error) {
-          processRef.stdout.off('data', onData);
+    this.sendRaw(JSON.stringify({ method: 'initialized' }));
+    this.initialized = true;
+  }
+
+  private rawRequest(
+    method: string,
+    params?: unknown,
+    opts?: { timeoutMs?: number; signal?: AbortSignal }
+  ): Promise<unknown> {
+    const id = this.nextId++;
+    const payload = JSON.stringify({ id, method, params });
+
+    return new Promise((resolve, reject) => {
+      if (opts?.signal?.aborted) {
+        reject(new AppError(`Codex RPC aborted: ${method}`, 499));
+        return;
+      }
+
+      const timer = opts?.timeoutMs
+        ? setTimeout(() => {
+            this.pendingRequests.delete(id);
+            reject(new AppError(`Codex RPC timeout: ${method}`, 504));
+          }, opts.timeoutMs)
+        : undefined;
+
+      this.pendingRequests.set(id, { reject, resolve, timer });
+
+      opts?.signal?.addEventListener(
+        'abort',
+        () => {
+          if (!this.pendingRequests.has(id)) return;
+          this.pendingRequests.delete(id);
+          clearTimeout(timer);
+          reject(new AppError(`Codex RPC aborted: ${method}`, 499));
+        },
+        { once: true }
+      );
+
+      this.proc?.stdin?.write(`${payload}\n`, 'utf8', (error) => {
+        if (error) {
+          if (!this.pendingRequests.has(id)) return;
+          this.pendingRequests.delete(id);
+          clearTimeout(timer);
           reject(
             new AppError(
-              'Failed to parse JSON-RPC response from Codex app-server',
+              `Failed to write to Codex app-server stdin: ${method}`,
               502,
               error
             )
           );
         }
-      };
-
-      processRef.stdout.on('data', onData);
-      processRef.stdin.write(
-        `${JSON.stringify(payload)}\n`,
-        'utf8',
-        (error) => {
-          if (error) {
-            processRef.stdout.off('data', onData);
-            reject(
-              new AppError(
-                'Failed to write JSON-RPC request to Codex app-server',
-                502,
-                error
-              )
-            );
-          }
-        }
-      );
+      });
     });
+  }
+
+  public async request(
+    method: string,
+    params?: unknown,
+    opts?: { timeoutMs?: number; signal?: AbortSignal }
+  ): Promise<unknown> {
+    await this.ensureInitialized();
+    return this.rawRequest(method, params, opts);
+  }
+
+  public async notify(method: string, params?: unknown): Promise<void> {
+    await this.ensureInitialized();
+    this.sendRaw(JSON.stringify({ method, params }));
   }
 }

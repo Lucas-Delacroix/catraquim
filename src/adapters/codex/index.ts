@@ -8,6 +8,8 @@ import type {
   ChatRequest,
 } from '../base.js';
 import { CodexAppServerClient } from './app-server.js';
+import { runTurn } from './run-turn.js';
+import { toThreadStartParams, toTurnBaseParams } from './translate.js';
 
 export class CodexAdapter implements Adapter {
   public readonly id = 'codex';
@@ -21,23 +23,27 @@ export class CodexAdapter implements Adapter {
     return this.config.models[model]?.adapter === this.id;
   }
 
-  public chat(
-    _req: ChatRequest,
-    _signal: AbortSignal
+  public async *chat(
+    req: ChatRequest,
+    signal: AbortSignal
   ): AsyncIterable<ChatChunk> {
-    void this.rpcClient;
-    return {
-      [Symbol.asyncIterator]() {
-        return {
-          next: async () => {
-            throw new AppError(
-              'Codex chat adapter is not implemented yet',
-              501
-            );
-          },
-        };
-      },
-    };
+    const modelConfig = this.config.models[req.model];
+    if (!modelConfig) {
+      throw new AppError(`Unknown model: ${req.model}`, 400);
+    }
+
+    const { upstreamModel } = modelConfig;
+    const threadParams = toThreadStartParams(upstreamModel);
+    const turnParams = toTurnBaseParams(req, upstreamModel);
+
+    const result = await runTurn(
+      this.rpcClient,
+      threadParams as unknown as Record<string, unknown>,
+      turnParams as unknown as Record<string, unknown>,
+      signal
+    );
+
+    yield { delta: result.text, finishReason: 'stop' };
   }
 
   public async status(): Promise<AdapterStatus> {

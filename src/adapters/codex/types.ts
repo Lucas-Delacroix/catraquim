@@ -1,16 +1,53 @@
-export interface CodexRpcRequest {
+export interface CodexRpcRequestMessage {
   id: number;
-  jsonrpc: '2.0';
   method: string;
-  params?: Record<string, unknown>;
+  params?: unknown;
 }
 
-export interface CodexRpcResponse {
+export interface CodexRpcNotificationMessage {
+  method: string;
+  params?: unknown;
+}
+
+export interface CodexRpcResponseMessage {
   id: number;
-  jsonrpc: '2.0';
   result?: unknown;
   error?: {
     code: number;
     message: string;
   };
+}
+
+export type CodexRpcMessage =
+  | CodexRpcRequestMessage
+  | CodexRpcNotificationMessage
+  | CodexRpcResponseMessage;
+
+export function isRpcResponse(msg: unknown): msg is CodexRpcResponseMessage {
+  return (
+    typeof msg === 'object' &&
+    msg !== null &&
+    'id' in msg &&
+    !('method' in msg)
+  );
+}
+
+export function isRpcRequest(msg: unknown): msg is CodexRpcRequestMessage {
+  return (
+    typeof msg === 'object' &&
+    msg !== null &&
+    'id' in msg &&
+    'method' in msg
+  );
+}
+
+export function isRpcNotification(
+  msg: unknown
+): msg is CodexRpcNotificationMessage {
+  return (
+    typeof msg === 'object' &&
+    msg !== null &&
+    'method' in msg &&
+    !('id' in msg)
+  );
 }

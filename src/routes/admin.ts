@@ -1,69 +1,30 @@
-import { type OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
+import type { OpenAPIHono } from '@hono/zod-openapi';
 
 import type { Adapter } from '../adapters/base.js';
 import type { AppConfig } from '../config/schema.js';
-import { errorResponseSchema } from './schemas.js';
+import { createApiRoute, jsonErrorResponses, jsonResponse } from './openapi.js';
+import { authStatusResponseSchema, healthzResponseSchema } from './schemas.js';
 
-const healthzResponseSchema = z
-  .object({
-    ok: z.boolean(),
-    server: z.object({
-      host: z.string(),
-      port: z.number().int().positive(),
-    }),
-  })
-  .openapi('HealthzResponse');
-
-const authStatusEntrySchema = z
-  .object({
-    expiresAt: z.string().nullable().optional(),
-    message: z.string().optional(),
-    ok: z.boolean(),
-  })
-  .openapi('AdapterAuthStatus');
-
-const authStatusResponseSchema = z
-  .record(z.string(), authStatusEntrySchema)
-  .openapi('AuthStatusResponse');
-
-const healthzRoute = createRoute({
+const healthzRoute = createApiRoute({
   method: 'get',
   path: '/healthz',
   responses: {
-    200: {
-      content: {
-        'application/json': {
-          schema: healthzResponseSchema,
-        },
-      },
-      description: 'Gateway liveness check.',
-    },
+    200: jsonResponse(healthzResponseSchema, 'Gateway liveness check.'),
   },
-  tags: ['Admin'],
+  tag: 'Admin',
 });
 
-const authStatusRoute = createRoute({
+const authStatusRoute = createApiRoute({
   method: 'get',
   path: '/auth/status',
   responses: {
-    200: {
-      content: {
-        'application/json': {
-          schema: authStatusResponseSchema,
-        },
-      },
-      description: 'Authentication status for configured adapters.',
-    },
-    401: {
-      content: {
-        'application/json': {
-          schema: errorResponseSchema,
-        },
-      },
-      description: 'Unauthorized.',
-    },
+    200: jsonResponse(
+      authStatusResponseSchema,
+      'Authentication status for configured adapters.'
+    ),
+    ...jsonErrorResponses([401]),
   },
-  tags: ['Admin'],
+  tag: 'Admin',
 });
 
 export const registerAdminRoutes = (

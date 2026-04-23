@@ -1,45 +1,17 @@
-import { type OpenAPIHono, createRoute, z } from '@hono/zod-openapi';
+import type { OpenAPIHono } from '@hono/zod-openapi';
 
 import type { AppConfig } from '../config/schema.js';
-import { errorResponseSchema } from './schemas.js';
+import { createApiRoute, jsonErrorResponses, jsonResponse } from './openapi.js';
+import { modelsResponseSchema } from './schemas.js';
 
-const modelEntrySchema = z
-  .object({
-    id: z.string(),
-    object: z.literal('model'),
-    owned_by: z.string(),
-  })
-  .openapi('ModelEntry');
-
-const modelsResponseSchema = z
-  .object({
-    object: z.literal('list'),
-    data: z.array(modelEntrySchema),
-  })
-  .openapi('ModelsResponse');
-
-const modelsRoute = createRoute({
+const modelsRoute = createApiRoute({
   method: 'get',
   path: '/v1/models',
   responses: {
-    200: {
-      content: {
-        'application/json': {
-          schema: modelsResponseSchema,
-        },
-      },
-      description: 'List configured models.',
-    },
-    401: {
-      content: {
-        'application/json': {
-          schema: errorResponseSchema,
-        },
-      },
-      description: 'Unauthorized.',
-    },
+    200: jsonResponse(modelsResponseSchema, 'List configured models.'),
+    ...jsonErrorResponses([401]),
   },
-  tags: ['Models'],
+  tag: 'Models',
 });
 
 export const registerModelsRoutes = (app: OpenAPIHono, config: AppConfig) => {

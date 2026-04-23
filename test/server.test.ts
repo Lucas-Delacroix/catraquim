@@ -93,4 +93,30 @@ describe('OpenAPI docs', () => {
       'HTTP request'
     );
   });
+
+  it('returns structured error payloads with canonical model metadata', async () => {
+    const app = createApp(createServerContext(defaultConfig));
+    const response = await app.request('/v1/chat/completions', {
+      body: JSON.stringify({
+        messages: [{ content: 'hi', role: 'user' }],
+        model: 'codex/does-not-exist',
+        stream: false,
+      }),
+      headers: {
+        'content-type': 'application/json',
+      },
+      method: 'POST',
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'unknown_model',
+        message: 'Unknown model: codex/does-not-exist',
+        requested_model: 'codex/does-not-exist',
+        transient: false,
+        type: 'compatibility_error',
+      },
+    });
+  });
 });

@@ -44,7 +44,13 @@ describe('config management', () => {
       created: true,
       filePath,
     });
-    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual(defaultConfig);
+    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({
+      ...defaultConfig,
+      models: {
+        'codex-max': 'codex/codex-max',
+        'codex-mini': 'codex/codex-mini',
+      },
+    });
   });
 
   it('does not overwrite an existing config without --force', () => {
@@ -81,7 +87,13 @@ describe('config management', () => {
     expect(spawnSyncMock).toHaveBeenCalledWith('vim', [filePath], {
       stdio: 'inherit',
     });
-    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual(defaultConfig);
+    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({
+      ...defaultConfig,
+      models: {
+        'codex-max': 'codex/codex-max',
+        'codex-mini': 'codex/codex-mini',
+      },
+    });
   });
 
   it('fails when $EDITOR is not configured', () => {
@@ -110,9 +122,9 @@ describe('config management', () => {
           .mockResolvedValueOnce('codex')
           .mockResolvedValueOnce('~/.codex')
           .mockResolvedValueOnce('gpt-5')
-          .mockResolvedValueOnce('codex-max')
+          .mockResolvedValueOnce('codex/codex-max')
           .mockResolvedValueOnce('gpt-5-mini')
-          .mockResolvedValueOnce('codex-mini'),
+          .mockResolvedValueOnce('codex/codex-mini'),
         close: vi.fn(),
         confirm: vi
           .fn()
@@ -128,14 +140,8 @@ describe('config management', () => {
     });
     expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({
       models: {
-        'gpt-5': {
-          adapter: 'codex',
-          upstreamModel: 'codex-max',
-        },
-        'gpt-5-mini': {
-          adapter: 'codex',
-          upstreamModel: 'codex-mini',
-        },
+        'gpt-5': 'codex/codex-max',
+        'gpt-5-mini': 'codex/codex-mini',
       },
       providers: {
         codex: {
@@ -167,7 +173,7 @@ describe('config management', () => {
           .mockResolvedValueOnce('codex')
           .mockResolvedValueOnce('~/.codex')
           .mockResolvedValueOnce('codex-max')
-          .mockResolvedValueOnce('codex-max'),
+          .mockResolvedValueOnce('codex/codex-max'),
         close: vi.fn(),
         confirm: vi
           .fn()

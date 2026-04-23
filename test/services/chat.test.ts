@@ -60,7 +60,10 @@ describe('CompleteChatUseCase', () => {
     );
 
     expect(result.content).toBe('hello world');
+    expect(result.canonicalModel).toBe('fake/fake-upstream');
     expect(result.finishReason).toBe('stop');
+    expect(result.providerId).toBe('fake');
+    expect(result.requestedModel).toBe('test-model');
   });
 
   it('resolves direct provider/model refs without a configured alias', async () => {
@@ -96,6 +99,7 @@ describe('CompleteChatUseCase', () => {
     );
 
     expect(seen[0]).toMatchObject({
+      canonicalModel: 'fake/gpt-5.4',
       model: 'fake/gpt-5.4',
       providerId: 'fake',
       upstreamModel: 'gpt-5.4',
@@ -122,6 +126,56 @@ describe('CompleteChatUseCase', () => {
         },
         new AbortController().signal
       )
-    ).rejects.toThrow('Unknown model: fake/not-in-catalog');
+    ).rejects.toMatchObject({
+      code: 'unknown_model',
+      requestedModel: 'fake/not-in-catalog',
+      type: 'compatibility_error',
+    });
+  });
+
+  it('enriches provider failures with canonical execution metadata', async () => {
+    class FailingAdapter extends FakeAdapter {
+      public override async *chat(): AsyncIterable<ChatChunk> {
+        yield { delta: '' };
+        throw new Error('adapter exploded');
+      }
+    }
+
+    const registry = new ModelRegistry(
+      {
+        ...defaultConfig.models,
+        'test-model': {
+          adapter: 'fake',
+          upstreamModel: 'fake-upstream',
+        },
+      },
+      {
+        ...defaultConfig.providers,
+        fake: {
+          type: 'codex',
+          binary: 'fake',
+          homePath: '~/.fake',
+        },
+      }
+    );
+    const useCase = new CompleteChatUseCase(registry, [new FailingAdapter()]);
+
+    await expect(
+      useCase.execute(
+        {
+          messages: [{ content: 'hi', role: 'user' }],
+          model: 'test-model',
+          stream: false,
+        },
+        new AbortController().signal
+      )
+    ).rejects.toMatchObject({
+      canonicalModel: 'fake/fake-upstream',
+      code: 'provider_request_failed',
+      providerId: 'fake',
+      requestedModel: 'test-model',
+      statusCode: 502,
+      type: 'provider_error',
+    });
   });
 });

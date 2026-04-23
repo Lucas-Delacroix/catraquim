@@ -12,6 +12,7 @@ describe('OpenAPI docs', () => {
 
     const body = await response.json();
     expect(body.info.title).toBe('catraquim');
+    expect(body.servers).toEqual([{ url: '/' }]);
     expect(body.paths['/v1/chat/completions']).toBeDefined();
   });
 

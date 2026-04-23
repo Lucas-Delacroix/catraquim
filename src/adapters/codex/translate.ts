@@ -20,9 +20,7 @@ export interface TurnBaseParams {
   model: string;
 }
 
-export function toThreadStartParams(
-  upstreamModel: string
-): ThreadStartParams {
+export function toThreadStartParams(upstreamModel: string): ThreadStartParams {
   return {
     approvalPolicy: 'never',
     approvalsReviewer: 'user',
@@ -40,9 +38,7 @@ export function toTurnBaseParams(
   req: ChatRequest,
   upstreamModel: string
 ): TurnBaseParams {
-  const text = req.messages
-    .map((m) => `${m.role}: ${m.content}`)
-    .join('\n');
+  const text = req.messages.map((m) => `${m.role}: ${m.content}`).join('\n');
 
   return {
     approvalPolicy: 'never',

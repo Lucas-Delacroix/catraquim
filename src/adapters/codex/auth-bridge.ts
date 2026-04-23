@@ -1,12 +1,34 @@
-import { mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+
+import { logger } from '../../logger.js';
 
 export const gatewayCodexHome = () =>
   join(homedir(), '.local', 'share', 'catraquim', 'codex-home');
 
-export const prepareCodexHome = () => {
+const resolveSource = (source: string): string => {
+  if (source === '~') return homedir();
+  if (source.startsWith('~/')) return join(homedir(), source.slice(2));
+  return source;
+};
+
+export const prepareCodexHome = (codexHomeSource: string): string => {
   const target = gatewayCodexHome();
   mkdirSync(target, { recursive: true });
+
+  const srcAuth = join(resolveSource(codexHomeSource), 'auth.json');
+  const dstAuth = join(target, 'auth.json');
+
+  if (existsSync(srcAuth)) {
+    try {
+      copyFileSync(srcAuth, dstAuth);
+    } catch (error) {
+      logger.warn({ error, srcAuth }, 'Failed to copy Codex auth.json');
+    }
+  } else {
+    logger.warn({ srcAuth }, 'Codex auth.json not found at source');
+  }
+
   return target;
 };

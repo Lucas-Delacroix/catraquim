@@ -25,19 +25,13 @@ export type CodexRpcMessage =
 
 export function isRpcResponse(msg: unknown): msg is CodexRpcResponseMessage {
   return (
-    typeof msg === 'object' &&
-    msg !== null &&
-    'id' in msg &&
-    !('method' in msg)
+    typeof msg === 'object' && msg !== null && 'id' in msg && !('method' in msg)
   );
 }
 
 export function isRpcRequest(msg: unknown): msg is CodexRpcRequestMessage {
   return (
-    typeof msg === 'object' &&
-    msg !== null &&
-    'id' in msg &&
-    'method' in msg
+    typeof msg === 'object' && msg !== null && 'id' in msg && 'method' in msg
   );
 }
 
@@ -45,9 +39,6 @@ export function isRpcNotification(
   msg: unknown
 ): msg is CodexRpcNotificationMessage {
   return (
-    typeof msg === 'object' &&
-    msg !== null &&
-    'method' in msg &&
-    !('id' in msg)
+    typeof msg === 'object' && msg !== null && 'method' in msg && !('id' in msg)
   );
 }

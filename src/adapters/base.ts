@@ -44,6 +44,7 @@ export interface AdapterStatus {
 export interface Adapter {
   id: string;
   chat(req: ChatRequest, signal: AbortSignal): AsyncIterable<ChatChunk>;
+  shutdown?(): void;
   status(): Promise<AdapterStatus>;
   supports(model: string): boolean;
 }

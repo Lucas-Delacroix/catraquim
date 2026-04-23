@@ -56,4 +56,8 @@ export class CodexAdapter implements Adapter {
       ok: auth.ok,
     };
   }
+
+  public shutdown(): void {
+    this.rpcClient.shutdown();
+  }
 }

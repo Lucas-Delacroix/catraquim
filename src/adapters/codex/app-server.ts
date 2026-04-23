@@ -6,10 +6,10 @@ import { AppError } from '../../errors.js';
 import { logger } from '../../logger.js';
 import { prepareCodexHome } from './auth-bridge.js';
 import {
+  type CodexRpcNotificationMessage,
   isRpcNotification,
   isRpcRequest,
   isRpcResponse,
-  type CodexRpcNotificationMessage,
 } from './types.js';
 
 interface PendingRequest {
@@ -21,11 +21,51 @@ interface PendingRequest {
 const SERVER_REQUEST_DEFAULTS: Record<string, unknown> = {
   'item/commandExecution/requestApproval': { decision: 'decline' },
   'item/fileChange/requestApproval': { decision: 'decline' },
-  'item/permissions/requestApproval': { decision: 'decline' },
+  // Grants no additional permissions for the duration of the turn
+  'item/permissions/requestApproval': { permissions: {}, scope: 'turn' },
   'item/tool/call': { contentItems: [], success: false },
   'item/tool/requestUserInput': { answers: {} },
   'mcpServer/elicitation/request': { action: 'decline' },
 };
+
+// Minimum server version accepted: 0.118.0
+// userAgent format from server: "<originator>/<semver>" e.g. "codex/0.120.1"
+const MIN_SERVER_VERSION = [0, 118, 0] as const;
+
+function parseVersion(userAgent: string): [number, number, number] | null {
+  const m = /^[^/]+\/(\d+)\.(\d+)\.(\d+)/.exec(userAgent);
+  if (!m) return null;
+  return [
+    Number.parseInt(m[1], 10),
+    Number.parseInt(m[2], 10),
+    Number.parseInt(m[3], 10),
+  ];
+}
+
+function versionAtLeast(
+  actual: [number, number, number],
+  min: readonly [number, number, number]
+): boolean {
+  for (let i = 0; i < min.length; i++) {
+    if (actual[i] > min[i]) return true;
+    if (actual[i] < min[i]) return false;
+  }
+  return true;
+}
+
+function buildChildEnv(
+  baseEnv: NodeJS.ProcessEnv,
+  overrides: NodeJS.ProcessEnv,
+  clearEnv: string[]
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...baseEnv, ...overrides };
+
+  for (const key of clearEnv) {
+    Reflect.deleteProperty(env, key);
+  }
+
+  return env;
+}
 
 export class CodexAppServerClient {
   private nextId = 1;
@@ -42,28 +82,43 @@ export class CodexAppServerClient {
   private spawnProcess() {
     if (this.proc && !this.proc.killed) return;
 
-    const codexHome = prepareCodexHome();
+    const codexHome = prepareCodexHome(this.config.codex.codexHomeSource);
     const isWindows = process.platform === 'win32';
+
+    const env = buildChildEnv(process.env, { CODEX_HOME: codexHome }, [
+      'OPENAI_API_KEY',
+    ]);
 
     this.proc = spawn(
       this.config.codex.binary,
       ['app-server', '--listen', 'stdio://'],
       {
         detached: !isWindows,
-        env: {
-          ...process.env,
-          CODEX_HOME: codexHome,
-          OPENAI_API_KEY: '',
-        },
+        env,
         stdio: ['pipe', 'pipe', 'pipe'],
       }
     );
 
-    const rl = createInterface({ input: this.proc.stdout! });
+    const stdin = this.proc.stdin;
+    const stdout = this.proc.stdout;
+    const stderr = this.proc.stderr;
+
+    if (!stdin || !stdout || !stderr) {
+      throw new AppError('Codex app-server stdio pipes are unavailable', 502);
+    }
+
+    stdin.on('error', (error) => {
+      logger.warn({ error }, 'codex app-server stdin error');
+    });
+
+    const rl = createInterface({ input: stdout });
     rl.on('line', (line) => this.handleLine(line));
 
-    this.proc.stderr!.on('data', (chunk: Buffer) => {
-      logger.debug({ chunk: chunk.toString('utf8') }, 'codex app-server stderr');
+    stderr.on('data', (chunk: Buffer) => {
+      logger.debug(
+        { chunk: chunk.toString('utf8') },
+        'codex app-server stderr'
+      );
     });
 
     this.proc.once('exit', (code, signal) => {
@@ -72,7 +127,10 @@ export class CodexAppServerClient {
       for (const [id, pending] of this.pendingRequests) {
         clearTimeout(pending.timer);
         pending.reject(
-          new AppError('Codex app-server exited while waiting for response', 502)
+          new AppError(
+            `Codex app-server exited (code=${code ?? 'null'} signal=${signal ?? 'null'})`,
+            502
+          )
         );
         this.pendingRequests.delete(id);
       }
@@ -156,12 +214,26 @@ export class CodexAppServerClient {
   private async runInitialize(): Promise<void> {
     this.spawnProcess();
 
-    const result = await this.rawRequest('initialize', {
+    const result = (await this.rawRequest('initialize', {
       capabilities: { experimentalApi: true },
-      clientInfo: { name: 'catraquim', version: '0.1.0' },
-    });
+      clientInfo: {
+        name: 'catraquim',
+        title: 'Catraquim Gateway',
+        version: '0.1.0',
+      },
+    })) as { userAgent?: string } | undefined;
 
-    logger.debug({ result }, 'codex app-server initialized');
+    const userAgent = result?.userAgent ?? '';
+    const version = userAgent ? parseVersion(userAgent) : null;
+
+    if (version && !versionAtLeast(version, MIN_SERVER_VERSION)) {
+      throw new AppError(
+        `Codex app-server version too old (${userAgent}); need >= ${MIN_SERVER_VERSION.join('.')}`,
+        502
+      );
+    }
+
+    logger.debug({ userAgent }, 'codex app-server initialized');
 
     this.sendRaw(JSON.stringify({ method: 'initialized' }));
     this.initialized = true;
@@ -230,5 +302,48 @@ export class CodexAppServerClient {
   public async notify(method: string, params?: unknown): Promise<void> {
     await this.ensureInitialized();
     this.sendRaw(JSON.stringify({ method, params }));
+  }
+
+  public shutdown(): void {
+    const proc = this.proc;
+    if (!proc || proc.killed) return;
+
+    const isWindows = process.platform === 'win32';
+
+    // Drain and close streams before signalling
+    proc.stdin?.end();
+    proc.stdin?.destroy();
+    proc.stdout?.destroy();
+    proc.stderr?.destroy();
+
+    let groupKilled = false;
+    if (!isWindows && proc.pid) {
+      try {
+        process.kill(-proc.pid, 'SIGTERM');
+        groupKilled = true;
+      } catch {
+        // process group already gone
+      }
+    }
+    if (!groupKilled) {
+      proc.kill('SIGTERM');
+    }
+
+    // SIGKILL fallback after 1 s
+    const timer = setTimeout(() => {
+      if (proc.killed) return;
+      if (!isWindows && proc.pid) {
+        try {
+          process.kill(-proc.pid, 'SIGKILL');
+          return;
+        } catch {
+          // fall through
+        }
+      }
+      proc.kill('SIGKILL');
+    }, 1000);
+
+    // Don't keep the Node.js process alive just for cleanup
+    timer.unref();
   }
 }

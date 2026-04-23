@@ -1,23 +1,79 @@
 import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
+import type { ServerType } from '@hono/node-server';
+import { swaggerUI } from '@hono/swagger-ui';
+import { OpenAPIHono } from '@hono/zod-openapi';
 
+import packageJson from '../package.json';
+import type { Adapter } from './adapters/base.js';
 import { CodexAdapter } from './adapters/codex/index.js';
 import { loadConfig } from './config/loader.js';
 import type { AppConfig } from './config/schema.js';
 import { AppError, toErrorResponse } from './errors.js';
 import { logger } from './logger.js';
 import { bearerAuth } from './middleware/auth.js';
-import { createAdminRoutes } from './routes/admin.js';
-import { createChatRoutes } from './routes/chat.js';
-import { createModelsRoutes } from './routes/models.js';
+import { registerAdminRoutes } from './routes/admin.js';
+import { registerChatRoutes } from './routes/chat.js';
+import { registerModelsRoutes } from './routes/models.js';
 import { ChatService } from './services/chat.js';
 import { ServiceRouter } from './services/router.js';
 
 export interface ServerContext {
-  adapters: CodexAdapter[];
+  adapters: Adapter[];
   chatService: ChatService;
   config: AppConfig;
 }
+
+const closeAdapters = (adapters: Adapter[]) => {
+  for (const adapter of adapters) {
+    try {
+      adapter.shutdown?.();
+    } catch (error) {
+      logger.warn(
+        { err: error, adapter: adapter.id },
+        'Adapter shutdown failed'
+      );
+    }
+  }
+};
+
+const registerShutdownHandlers = (server: ServerType, adapters: Adapter[]) => {
+  let shuttingDown = false;
+  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+
+  const removeHandlers = () => {
+    for (const signal of signals) {
+      const handler = signalHandlers.get(signal);
+      if (handler) {
+        process.removeListener(signal, handler);
+      }
+    }
+  };
+
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    logger.info({ signal }, 'Shutting down catraquim');
+    closeAdapters(adapters);
+
+    server.close((error?: Error) => {
+      if (error) {
+        logger.error({ err: error }, 'HTTP server close failed');
+        process.exitCode = 1;
+      }
+      removeHandlers();
+    });
+  };
+
+  const signalHandlers = new Map<NodeJS.Signals, () => void>();
+  for (const signal of signals) {
+    const handler = () => shutdown(signal);
+    signalHandlers.set(signal, handler);
+    process.once(signal, handler);
+  }
+
+  server.once('close', removeHandlers);
+};
 
 export const createServerContext = (config = loadConfig()): ServerContext => {
   const adapters = [new CodexAdapter(config)];
@@ -32,12 +88,33 @@ export const createServerContext = (config = loadConfig()): ServerContext => {
 };
 
 export const createApp = (context = createServerContext()) => {
-  const app = new Hono();
+  const app = new OpenAPIHono();
 
   app.use('*', bearerAuth(context.config.server.token));
-  app.route('/', createAdminRoutes(context.config, context.adapters));
-  app.route('/', createModelsRoutes(context.config));
-  app.route('/', createChatRoutes(context.config, context.chatService));
+  registerAdminRoutes(app, context.config, context.adapters);
+  registerModelsRoutes(app, context.config);
+  registerChatRoutes(app, context.config, context.chatService);
+
+  app.doc('/openapi.json', {
+    info: {
+      title: 'catraquim',
+      version: packageJson.version,
+      description: packageJson.description,
+    },
+    openapi: '3.0.0',
+    servers: [
+      {
+        url: '/',
+      },
+    ],
+  });
+
+  app.get(
+    '/docs',
+    swaggerUI({
+      url: '/openapi.json',
+    })
+  );
 
   app.onError((error, c) => {
     if (error instanceof AppError) {
@@ -54,16 +131,21 @@ export const createApp = (context = createServerContext()) => {
 };
 
 export const startServer = (config = loadConfig()) => {
-  const app = createApp(createServerContext(config));
+  const context = createServerContext(config);
+  const app = createApp(context);
 
   logger.info(
     { host: config.server.host, port: config.server.port },
     'Starting catraquim'
   );
 
-  return serve({
+  const server = serve({
     fetch: app.fetch,
     hostname: config.server.host,
     port: config.server.port,
   });
+
+  registerShutdownHandlers(server, context.adapters);
+
+  return server;
 };

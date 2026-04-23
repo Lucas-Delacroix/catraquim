@@ -36,4 +36,10 @@ export class ProviderModelCatalog {
       }
     });
   }
+
+  public has(providerId: string, modelId: string): boolean {
+    return this.list().some(
+      (entry) => entry.providerId === providerId && entry.modelId === modelId
+    );
+  }
 }

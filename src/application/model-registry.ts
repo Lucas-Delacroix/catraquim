@@ -1,6 +1,7 @@
 import type { AppConfig } from '../config/schema.js';
 import { AppError } from '../errors.js';
 import { modelKey, parseModelRef } from './model-ref.js';
+import { ProviderModelCatalog } from './provider-model-catalog.js';
 
 export interface ModelBinding {
   gatewayModel: string;
@@ -16,10 +17,16 @@ export interface ModelDefinition {
 }
 
 export class ModelRegistry {
+  private readonly providerModelCatalog: ProviderModelCatalog;
+
   public constructor(
     private readonly models: AppConfig['models'],
-    private readonly providers: AppConfig['providers']
-  ) {}
+    private readonly providers: AppConfig['providers'],
+    providerModelCatalog?: ProviderModelCatalog
+  ) {
+    this.providerModelCatalog =
+      providerModelCatalog ?? new ProviderModelCatalog(providers);
+  }
 
   public list(): ModelDefinition[] {
     return Object.entries(this.models).map(([id, definition]) => ({
@@ -41,7 +48,11 @@ export class ModelRegistry {
     }
 
     const directRef = parseModelRef(model);
-    if (directRef && this.providers[directRef.providerId]) {
+    if (
+      directRef &&
+      this.providers[directRef.providerId] &&
+      this.providerModelCatalog.has(directRef.providerId, directRef.model)
+    ) {
       return {
         gatewayModel: model,
         providerId: directRef.providerId,

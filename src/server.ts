@@ -81,8 +81,12 @@ const registerShutdownHandlers = (server: ServerType, adapters: Adapter[]) => {
 };
 
 export const createServerContext = (config = loadConfig()): ServerContext => {
-  const modelRegistry = new ModelRegistry(config.models, config.providers);
   const providerModelCatalog = new ProviderModelCatalog(config.providers);
+  const modelRegistry = new ModelRegistry(
+    config.models,
+    config.providers,
+    providerModelCatalog
+  );
   const adapters = new ProviderFactory().create(config);
   const completeChat = new CompleteChatUseCase(modelRegistry, adapters);
   const getProviderStatuses = new GetProviderStatusesUseCase(adapters);

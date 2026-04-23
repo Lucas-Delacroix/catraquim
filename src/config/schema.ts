@@ -11,7 +11,7 @@ export const appConfigSchema = z.object({
     port: z.number().int().positive(),
     token: z.string().min(1).nullable(),
   }),
-  models: z.record(modelConfigSchema),
+  models: z.record(z.string(), modelConfigSchema),
   codex: z.object({
     binary: z.string().min(1),
     codexHomeSource: z.string().min(1),

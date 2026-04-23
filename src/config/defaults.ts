@@ -6,13 +6,13 @@ export const defaultConfig: AppConfig = {
     codexHomeSource: '~/.codex',
   },
   models: {
-    'gpt-5': {
+    'codex-max': {
       adapter: 'codex',
-      upstreamModel: 'gpt-5',
+      upstreamModel: 'codex-max',
     },
-    'gpt-5-codex': {
+    'codex-mini': {
       adapter: 'codex',
-      upstreamModel: 'gpt-5',
+      upstreamModel: 'codex-mini',
     },
   },
   server: {

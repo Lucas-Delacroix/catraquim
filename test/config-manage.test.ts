@@ -19,6 +19,15 @@ import {
 } from '../src/config/manage.js';
 
 const tempDirs: string[] = [];
+const serializedDefaultConfig = () => ({
+  ...defaultConfig,
+  models: Object.fromEntries(
+    Object.entries(defaultConfig.models).map(([alias, model]) => [
+      alias,
+      `${model.adapter}/${model.upstreamModel}`,
+    ])
+  ),
+});
 
 const createTempPath = () => {
   const dir = mkdtempSync(join(tmpdir(), 'catraquim-config-'));
@@ -44,13 +53,9 @@ describe('config management', () => {
       created: true,
       filePath,
     });
-    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({
-      ...defaultConfig,
-      models: {
-        'codex-max': 'codex/codex-max',
-        'codex-mini': 'codex/codex-mini',
-      },
-    });
+    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual(
+      serializedDefaultConfig()
+    );
   });
 
   it('does not overwrite an existing config without --force', () => {
@@ -87,13 +92,9 @@ describe('config management', () => {
     expect(spawnSyncMock).toHaveBeenCalledWith('vim', [filePath], {
       stdio: 'inherit',
     });
-    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual({
-      ...defaultConfig,
-      models: {
-        'codex-max': 'codex/codex-max',
-        'codex-mini': 'codex/codex-mini',
-      },
-    });
+    expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual(
+      serializedDefaultConfig()
+    );
   });
 
   it('fails when $EDITOR is not configured', () => {

@@ -76,17 +76,21 @@ class MockCodexServer extends EventEmitter {
 const mockSpawn = spawn as ReturnType<typeof vi.fn>;
 const mockPrepareCodexHome = prepareCodexHome as ReturnType<typeof vi.fn>;
 
-function createPair() {
+function createPair({
+  autoInitialize = true,
+}: { autoInitialize?: boolean } = {}) {
   const server = new MockCodexServer();
   mockSpawn.mockReturnValue(server);
   mockPrepareCodexHome.mockReturnValue('/tmp/mock-codex-home');
 
   // userAgent format: "<originator>/<semver>", version must be >= 0.118.0
-  server.onMessage((msg) => {
-    if (msg.method === 'initialize') {
-      server.respond(msg.id as number, { userAgent: 'codex-mock/0.120.0' });
-    }
-  });
+  if (autoInitialize) {
+    server.onMessage((msg) => {
+      if (msg.method === 'initialize') {
+        server.respond(msg.id as number, { userAgent: 'codex-mock/0.120.0' });
+      }
+    });
+  }
 
   const client = new CodexAppServerClient(defaultConfig.providers.codex);
   return { client, server };
@@ -201,6 +205,40 @@ describe('CodexAppServerClient – request/response correlation', () => {
     );
 
     await expect(requestPromise).rejects.toThrow('boom');
+  });
+
+  it('times out initialization when the Codex app-server never handshakes', async () => {
+    vi.useFakeTimers();
+    const { client } = createPair({ autoInitialize: false });
+
+    const requestPromise = client.request('ping', {});
+    const expectation = expect(requestPromise).rejects.toMatchObject({
+      code: 'rpc_timeout',
+      message: 'Codex RPC timeout: initialize',
+      statusCode: 504,
+      type: 'transient_error',
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expectation;
+
+    vi.useRealTimers();
+  });
+
+  it('rejects invalid initialize responses instead of trusting unchecked casts', async () => {
+    const { client, server } = createPair({ autoInitialize: false });
+
+    server.onMessage((msg) => {
+      if (msg.method === 'initialize') {
+        server.respond(msg.id as number, { userAgent: 123 });
+      }
+    });
+
+    await expect(client.request('ping', {})).rejects.toMatchObject({
+      code: 'invalid_initialize_response',
+      statusCode: 502,
+      type: 'provider_error',
+    });
   });
 });
 
@@ -353,6 +391,29 @@ describe('runTurn – thread/start → turn/start → turn/completed', () => {
     );
 
     expect(result.text).toBe('Nested reply');
+  });
+
+  it('rejects invalid thread/start responses instead of dereferencing undefined ids', async () => {
+    const { client, server } = createPair();
+
+    server.onMessage((msg) => {
+      if (msg.method === 'thread/start') {
+        server.respond(msg.id as number, { thread: {} });
+      }
+    });
+
+    await expect(
+      runTurn(
+        client,
+        { model: 'gpt-5', modelProvider: 'openai' },
+        { approvalPolicy: 'never', model: 'gpt-5' },
+        new AbortController().signal
+      )
+    ).rejects.toMatchObject({
+      code: 'invalid_thread_start_response',
+      statusCode: 502,
+      type: 'provider_error',
+    });
   });
 
   it('rejects when turn/start returns status failed', async () => {

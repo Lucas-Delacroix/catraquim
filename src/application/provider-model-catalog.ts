@@ -1,5 +1,8 @@
+import type { Adapter } from '../adapters/base.js';
 import type { AppConfig } from '../config/schema.js';
+import { logger } from '../logger.js';
 import { modelKey } from './model-ref.js';
+import { staticModelIdsForProviderType } from './static-models.js';
 
 export interface ProviderCatalogEntry {
   canonicalRef: string;
@@ -7,58 +10,107 @@ export interface ProviderCatalogEntry {
   providerId: string;
 }
 
-const CODEX_MODEL_IDS = [
-  'codex-max',
-  'codex-mini',
-  'gpt-5.4',
-  'gpt-5.4-mini',
-  'gpt-5.4-pro',
-  'gpt-5.3-codex',
-  'gpt-5.3-codex-spark',
-  'gpt-5.2-codex',
-  'gpt-5.1-codex',
-] as const;
+export interface ProviderModelCatalogOptions {
+  refreshTtlMs?: number;
+}
 
-const modelIdsForProviderType = (
-  type: AppConfig['providers'][string]['type']
-) => {
-  switch (type) {
-    case 'codex':
-      return CODEX_MODEL_IDS;
-    default:
-      return [];
-  }
-};
+interface ProviderState {
+  modelIds: Set<string>;
+  source: 'static' | 'dynamic';
+  lastRefreshedAt: number;
+}
+
+const DEFAULT_REFRESH_TTL_MS = 5 * 60 * 1000;
 
 export class ProviderModelCatalog {
-  private readonly entries: ProviderCatalogEntry[];
-  private readonly modelIdsByProvider: ReadonlyMap<string, ReadonlySet<string>>;
+  private readonly providers: AppConfig['providers'];
+  private readonly state = new Map<string, ProviderState>();
+  private readonly refreshTtlMs: number;
 
-  public constructor(providers: AppConfig['providers']) {
-    this.entries = Object.entries(providers).flatMap(([providerId, provider]) =>
-      modelIdsForProviderType(provider.type).map((modelId) => ({
-        canonicalRef: modelKey(providerId, modelId),
-        modelId,
-        providerId,
-      }))
-    );
-    this.modelIdsByProvider = new Map(
-      Object.entries(providers).map(([providerId, provider]) => [
-        providerId,
-        new Set(modelIdsForProviderType(provider.type)),
-      ])
-    );
+  public constructor(
+    providers: AppConfig['providers'],
+    options: ProviderModelCatalogOptions = {}
+  ) {
+    this.providers = providers;
+    this.refreshTtlMs = options.refreshTtlMs ?? DEFAULT_REFRESH_TTL_MS;
+
+    for (const [providerId, provider] of Object.entries(providers)) {
+      this.state.set(providerId, {
+        modelIds: new Set(staticModelIdsForProviderType(provider.type)),
+        source: 'static',
+        lastRefreshedAt: 0,
+      });
+    }
   }
 
   public list(): ProviderCatalogEntry[] {
-    return this.entries;
+    const entries: ProviderCatalogEntry[] = [];
+    for (const [providerId, providerState] of this.state) {
+      for (const modelId of providerState.modelIds) {
+        entries.push({
+          canonicalRef: modelKey(providerId, modelId),
+          modelId,
+          providerId,
+        });
+      }
+    }
+    return entries;
   }
 
   public listForProvider(providerId: string): ProviderCatalogEntry[] {
-    return this.entries.filter((entry) => entry.providerId === providerId);
+    const providerState = this.state.get(providerId);
+    if (!providerState) return [];
+
+    return Array.from(providerState.modelIds, (modelId) => ({
+      canonicalRef: modelKey(providerId, modelId),
+      modelId,
+      providerId,
+    }));
   }
 
   public has(providerId: string, modelId: string): boolean {
-    return this.modelIdsByProvider.get(providerId)?.has(modelId) ?? false;
+    return this.state.get(providerId)?.modelIds.has(modelId) ?? false;
+  }
+
+  public isStale(providerId: string, now: number = Date.now()): boolean {
+    const providerState = this.state.get(providerId);
+    if (!providerState) return false;
+    return now - providerState.lastRefreshedAt >= this.refreshTtlMs;
+  }
+
+  public sourceFor(providerId: string): ProviderState['source'] | undefined {
+    return this.state.get(providerId)?.source;
+  }
+
+  public async refresh(adapters: Adapter[]): Promise<void> {
+    await Promise.all(adapters.map((adapter) => this.refreshProvider(adapter)));
+  }
+
+  public async refreshProvider(adapter: Adapter): Promise<void> {
+    const providerState = this.state.get(adapter.id);
+    if (!providerState) return;
+    if (!adapter.listModels) return;
+
+    try {
+      const discovered = await adapter.listModels();
+      const ids = discovered
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
+      if (ids.length === 0) return;
+
+      providerState.modelIds = new Set(ids);
+      providerState.source = 'dynamic';
+      providerState.lastRefreshedAt = Date.now();
+
+      logger.info(
+        { count: ids.length, providerId: adapter.id },
+        'Provider model catalog refreshed from adapter'
+      );
+    } catch (error) {
+      logger.warn(
+        { err: error, providerId: adapter.id },
+        'Provider model discovery failed; keeping previous catalog entries'
+      );
+    }
   }
 }

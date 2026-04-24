@@ -295,7 +295,12 @@ export const setupConfig = async ({
   const currentProvider =
     findFirstProviderByType(currentConfig.providers, 'codex') ??
     defaultCodexProvider();
-  const modelEntries = Object.entries(currentConfig.models);
+  const allModelEntries = Object.entries(currentConfig.models);
+  const providerModelEntries = allModelEntries.filter(
+    ([, model]) => model.adapter === currentProvider.id
+  );
+  const modelEntries =
+    providerModelEntries.length > 0 ? providerModelEntries : allModelEntries;
   const firstModel = modelEntries[0] ?? [
     'codex-max',
     defaultConfig.models['codex-max'],

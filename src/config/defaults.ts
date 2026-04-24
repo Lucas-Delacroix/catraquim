@@ -2,6 +2,14 @@ import type { AppConfig } from './schema.js';
 
 export const defaultConfig: AppConfig = {
   models: {
+    'claude-opus': {
+      adapter: 'claude-code',
+      upstreamModel: 'claude-opus-4-7',
+    },
+    'claude-sonnet': {
+      adapter: 'claude-code',
+      upstreamModel: 'claude-sonnet-4-6',
+    },
     'codex-max': {
       adapter: 'codex',
       upstreamModel: 'codex-max',
@@ -12,6 +20,11 @@ export const defaultConfig: AppConfig = {
     },
   },
   providers: {
+    'claude-code': {
+      type: 'claude-code',
+      binary: 'claude',
+      homePath: '~/.claude',
+    },
     codex: {
       type: 'codex',
       binary: 'codex',

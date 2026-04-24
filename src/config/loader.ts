@@ -54,20 +54,41 @@ const mergeUserConfigs = (configs: Partial<AppConfig>[]): AppConfig => {
 };
 
 const applyEnvOverrides = (config: AppConfig): AppConfig => {
+  const claudeCodeProvider = findFirstProviderByType(
+    config.providers,
+    'claude-code'
+  );
   const codexProvider = findFirstProviderByType(config.providers, 'codex');
 
   return mergeConfig(config, {
-    providers: codexProvider
-      ? {
-          [codexProvider.id]: {
-            ...codexProvider.config,
-            binary:
-              readOptionalEnv('CATRAQUIM_CODEX_BINARY') ??
-              codexProvider.config.binary,
-            homePath: expandHome(codexProvider.config.homePath),
-          },
-        }
-      : undefined,
+    providers:
+      claudeCodeProvider || codexProvider
+        ? {
+            ...(claudeCodeProvider
+              ? {
+                  [claudeCodeProvider.id]: {
+                    ...claudeCodeProvider.config,
+                    binary:
+                      readOptionalEnv('CATRAQUIM_CLAUDE_CODE_BINARY') ??
+                      readOptionalEnv('CATRAQUIM_CLAUDE_BINARY') ??
+                      claudeCodeProvider.config.binary,
+                    homePath: expandHome(claudeCodeProvider.config.homePath),
+                  },
+                }
+              : {}),
+            ...(codexProvider
+              ? {
+                  [codexProvider.id]: {
+                    ...codexProvider.config,
+                    binary:
+                      readOptionalEnv('CATRAQUIM_CODEX_BINARY') ??
+                      codexProvider.config.binary,
+                    homePath: expandHome(codexProvider.config.homePath),
+                  },
+                }
+              : {}),
+          }
+        : undefined,
     server: {
       host: config.server.host,
       port: Number(readOptionalEnv('CATRAQUIM_PORT') ?? config.server.port),

@@ -11,8 +11,15 @@ export const codexProviderConfigSchema = z.object({
   homePath: z.string().min(1),
 });
 
+export const claudeCodeProviderConfigSchema = z.object({
+  type: z.literal('claude-code'),
+  binary: z.string().min(1),
+  homePath: z.string().min(1),
+});
+
 export const providerConfigSchema = z.discriminatedUnion('type', [
   codexProviderConfigSchema,
+  claudeCodeProviderConfigSchema,
 ]);
 
 export const appConfigSchema = z.object({
@@ -26,6 +33,9 @@ export const appConfigSchema = z.object({
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
+export type ClaudeCodeProviderConfig = z.infer<
+  typeof claudeCodeProviderConfigSchema
+>;
 export type CodexProviderConfig = z.infer<typeof codexProviderConfigSchema>;
 export type ModelConfig = z.infer<typeof modelConfigSchema>;
 export type ProviderConfig = z.infer<typeof providerConfigSchema>;

@@ -26,6 +26,7 @@ export interface ServerContext {
   completeChat: CompleteChatUseCase;
   getProviderStatuses: GetProviderStatusesUseCase;
   listModels: ListModelsUseCase;
+  providerModelCatalog: ProviderModelCatalog;
 }
 
 interface RequestLogContext {
@@ -131,6 +132,7 @@ const createUseCases = (config: AppConfig, adapters: Adapter[]) => {
     completeChat: new CompleteChatUseCase(modelRegistry, adapters),
     getProviderStatuses: new GetProviderStatusesUseCase(adapters),
     listModels: new ListModelsUseCase(modelRegistry, providerModelCatalog),
+    providerModelCatalog,
   };
 };
 
@@ -207,6 +209,15 @@ export const createApp = (context = createServerContext()) => {
   return app;
 };
 
+const refreshModelCatalogInBackground = (context: ServerContext) => {
+  context.providerModelCatalog.refresh(context.adapters).catch((error) => {
+    logger.warn(
+      { err: error },
+      'Background model catalog refresh raised unexpectedly'
+    );
+  });
+};
+
 export const startServer = (config = loadConfig()) => {
   const context = createServerContext(config);
   const app = createApp(context);
@@ -228,6 +239,7 @@ export const startServer = (config = loadConfig()) => {
     port: config.server.port,
   });
 
+  refreshModelCatalogInBackground(context);
   registerShutdownHandlers(server, context.adapters);
 
   return server;

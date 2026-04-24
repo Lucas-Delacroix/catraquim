@@ -13,6 +13,8 @@ import {
 } from './types.js';
 
 interface PendingRequest {
+  abortCleanup?: () => void;
+  phase: 'handshake' | 'processing';
   reject: (error: Error) => void;
   resolve: (result: unknown) => void;
   timer?: ReturnType<typeof setTimeout>;
@@ -23,6 +25,13 @@ interface ProcessStreams {
   stdin: NonNullable<ChildProcess['stdin']>;
   stdout: NonNullable<ChildProcess['stdout']>;
 }
+
+type TransportState =
+  | 'idle'
+  | 'handshaking'
+  | 'ready'
+  | 'processing'
+  | 'shutdown';
 
 const SERVER_REQUEST_DEFAULTS: Record<string, unknown> = {
   'item/commandExecution/requestApproval': { decision: 'decline' },
@@ -48,15 +57,49 @@ const buildChildEnv = (
 };
 
 export class CodexRpcTransport {
+  private activeProcessingRequests = 0;
+  private activeHandshakeRequests = 0;
   private exitHandlers: Array<() => void> = [];
+  private handshakeComplete = false;
   private nextId = 1;
   private proc?: ChildProcess;
+  private processCleanup?: () => void;
   private pendingRequests = new Map<number, PendingRequest>();
   private notificationHandlers: Array<
     (msg: CodexRpcNotificationMessage) => void
   > = [];
+  private shutdownRequested = false;
+  private state: TransportState = 'idle';
 
   public constructor(private readonly config: CodexProviderConfig) {}
+
+  private setState(next: TransportState) {
+    this.state = next;
+  }
+
+  private syncState() {
+    if (this.shutdownRequested) {
+      this.setState('shutdown');
+      return;
+    }
+
+    if (!this.proc || this.proc.killed) {
+      this.setState('idle');
+      return;
+    }
+
+    if (!this.handshakeComplete || this.activeHandshakeRequests > 0) {
+      this.setState('handshaking');
+      return;
+    }
+
+    if (this.activeProcessingRequests > 0) {
+      this.setState('processing');
+      return;
+    }
+
+    this.setState('ready');
+  }
 
   private isRunning() {
     return this.proc && !this.proc.killed;
@@ -86,18 +129,42 @@ export class CodexRpcTransport {
     return { stderr, stdin, stdout };
   }
 
-  private rejectPendingRequest(id: number, error: Error) {
+  private completePendingRequest(id: number, error?: Error, result?: unknown) {
     const pending = this.pendingRequests.get(id);
     if (!pending) return;
 
     this.pendingRequests.delete(id);
     clearTimeout(pending.timer);
-    pending.reject(error);
+    pending.abortCleanup?.();
+
+    if (pending.phase === 'handshake') {
+      this.activeHandshakeRequests = Math.max(
+        0,
+        this.activeHandshakeRequests - 1
+      );
+      if (!error) {
+        this.handshakeComplete = true;
+      }
+    } else {
+      this.activeProcessingRequests = Math.max(
+        0,
+        this.activeProcessingRequests - 1
+      );
+    }
+
+    this.syncState();
+
+    if (error) {
+      pending.reject(error);
+      return;
+    }
+
+    pending.resolve(result);
   }
 
   private rejectAllPending(errorFactory: () => Error) {
     for (const id of [...this.pendingRequests.keys()]) {
-      this.rejectPendingRequest(id, errorFactory());
+      this.completePendingRequest(id, errorFactory());
     }
   }
 
@@ -169,6 +236,7 @@ export class CodexRpcTransport {
   }
 
   private attachProcessListeners(streams: ProcessStreams) {
+    const proc = this.proc;
     streams.stdin.on('error', (error) => {
       logger.warn({ error }, 'codex app-server stdin error');
     });
@@ -183,24 +251,43 @@ export class CodexRpcTransport {
       );
     });
 
-    this.proc?.once('error', (error) => {
+    const handleError = (error: Error) => {
       logger.warn({ err: error }, 'codex app-server process error');
       this.rejectAllPending(() => this.processError(error));
-    });
+    };
 
-    this.proc?.once('exit', (code, signal) => {
+    const handleExit = (code: number | null, signal: NodeJS.Signals | null) => {
       logger.warn({ code, signal }, 'codex app-server exited');
       this.rejectAllPending(() => this.processExitError(code, signal));
+      rl.close();
 
       this.proc = undefined;
+      this.processCleanup = undefined;
+      this.handshakeComplete = false;
+      this.syncState();
       for (const handler of [...this.exitHandlers]) {
         handler();
       }
-    });
+    };
+
+    proc?.once('error', handleError);
+    proc?.once('exit', handleExit);
+
+    this.processCleanup = () => {
+      rl.close();
+      streams.stdin.removeAllListeners('error');
+      streams.stderr.removeAllListeners('data');
+      proc?.removeListener('error', handleError);
+      proc?.removeListener('exit', handleExit);
+    };
   }
 
   public start(): void {
     if (this.isRunning()) return;
+
+    this.shutdownRequested = false;
+    this.handshakeComplete = false;
+    this.setState('handshaking');
 
     const isWindows = process.platform === 'win32';
 
@@ -214,6 +301,7 @@ export class CodexRpcTransport {
       }
     );
     this.attachProcessListeners(this.requireProcessStreams(this.proc));
+    this.syncState();
   }
 
   public onExit(handler: () => void): () => void {
@@ -242,7 +330,7 @@ export class CodexRpcTransport {
       if (!pending) return;
 
       if (msg.error) {
-        this.rejectPendingRequest(
+        this.completePendingRequest(
           msg.id,
           AppError.provider(
             `Codex RPC error on request ${msg.id}: ${msg.error.message}`,
@@ -257,9 +345,7 @@ export class CodexRpcTransport {
           )
         );
       } else {
-        this.pendingRequests.delete(msg.id);
-        clearTimeout(pending.timer);
-        pending.resolve(msg.result);
+        this.completePendingRequest(msg.id, undefined, msg.result);
       }
       return;
     }
@@ -272,7 +358,11 @@ export class CodexRpcTransport {
 
     if (isRpcNotification(msg)) {
       for (const handler of [...this.notificationHandlers]) {
-        handler(msg);
+        try {
+          handler(msg);
+        } catch (error) {
+          logger.warn({ err: error }, 'Codex notification handler failed');
+        }
       }
     }
   }
@@ -295,6 +385,10 @@ export class CodexRpcTransport {
   ): Promise<unknown> {
     const id = this.nextId++;
     const payload = JSON.stringify({ id, method, params });
+    const phase =
+      method === 'initialize' || !this.handshakeComplete
+        ? 'handshake'
+        : 'processing';
 
     return new Promise((resolve, reject) => {
       if (opts?.signal?.aborted) {
@@ -304,29 +398,41 @@ export class CodexRpcTransport {
 
       const timer = opts?.timeoutMs
         ? setTimeout(() => {
-            this.rejectPendingRequest(id, this.rpcTimeoutError(method));
+            this.completePendingRequest(id, this.rpcTimeoutError(method));
           }, opts.timeoutMs)
         : undefined;
 
-      this.pendingRequests.set(id, { reject, resolve, timer });
+      if (phase === 'handshake') {
+        this.activeHandshakeRequests += 1;
+      } else {
+        this.activeProcessingRequests += 1;
+      }
 
-      opts?.signal?.addEventListener(
-        'abort',
-        () => {
-          this.rejectPendingRequest(id, this.rpcAbortError(method));
-        },
-        { once: true }
-      );
+      const abortHandler = () => {
+        this.completePendingRequest(id, this.rpcAbortError(method));
+      };
+
+      opts?.signal?.addEventListener('abort', abortHandler, { once: true });
+
+      this.pendingRequests.set(id, {
+        abortCleanup: () =>
+          opts?.signal?.removeEventListener('abort', abortHandler),
+        phase,
+        reject,
+        resolve,
+        timer,
+      });
+      this.syncState();
 
       const stdin = this.proc?.stdin;
       if (!stdin) {
-        this.rejectPendingRequest(id, this.appServerNotRunningError());
+        this.completePendingRequest(id, this.appServerNotRunningError());
         return;
       }
 
       stdin.write(`${payload}\n`, 'utf8', (error) => {
         if (error) {
-          this.rejectPendingRequest(id, this.stdinWriteError(method, error));
+          this.completePendingRequest(id, this.stdinWriteError(method, error));
         }
       });
     });
@@ -347,6 +453,12 @@ export class CodexRpcTransport {
   public shutdown(): void {
     const proc = this.proc;
     if (!proc || proc.killed) return;
+
+    this.shutdownRequested = true;
+    this.syncState();
+    this.rejectAllPending(() => this.appServerNotRunningError());
+    this.processCleanup?.();
+    this.processCleanup = undefined;
 
     const isWindows = process.platform === 'win32';
     proc.stdin?.end();

@@ -7,6 +7,7 @@ import type {
   ResolvedChatRequest,
 } from '../base.js';
 import { CodexAppServerClient } from './app-server.js';
+import { listCodexModels } from './list-models.js';
 import { runTurn } from './run-turn.js';
 import { toThreadStartParams, toTurnBaseParams } from './translate.js';
 
@@ -35,6 +36,10 @@ export class CodexAdapter implements Adapter {
     );
 
     yield { delta: result.text, finishReason: 'stop' };
+  }
+
+  public listModels(signal?: AbortSignal): Promise<string[]> {
+    return listCodexModels(this.rpcClient, { signal });
   }
 
   public async status(): Promise<AdapterStatus> {

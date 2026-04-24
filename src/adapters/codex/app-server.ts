@@ -7,6 +7,7 @@ import type { CodexRpcNotificationMessage } from './types.js';
 // Minimum server version accepted: 0.118.0
 // userAgent format from server: "<originator>/<semver>" e.g. "codex/0.120.1"
 const MIN_SERVER_VERSION = [0, 118, 0] as const;
+const INITIALIZE_TIMEOUT_MS = 5_000;
 
 function parseVersion(userAgent: string): [number, number, number] | null {
   const m = /^[^/]+\/(\d+)\.(\d+)\.(\d+)/.exec(userAgent);
@@ -59,14 +60,18 @@ export class CodexAppServerClient {
   private async runInitialize(): Promise<void> {
     this.transport.start();
 
-    const result = (await this.transport.request('initialize', {
-      capabilities: { experimentalApi: true },
-      clientInfo: {
-        name: 'catraquim',
-        title: 'Catraquim Gateway',
-        version: '0.1.0',
+    const result = (await this.transport.request(
+      'initialize',
+      {
+        capabilities: { experimentalApi: true },
+        clientInfo: {
+          name: 'catraquim',
+          title: 'Catraquim Gateway',
+          version: '0.1.0',
+        },
       },
-    })) as { userAgent?: string } | undefined;
+      { timeoutMs: INITIALIZE_TIMEOUT_MS }
+    )) as { userAgent?: string } | undefined;
 
     const userAgent = result?.userAgent ?? '';
     const version = userAgent ? parseVersion(userAgent) : null;

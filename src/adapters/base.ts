@@ -50,6 +50,7 @@ export interface AdapterStatus {
 export interface Adapter {
   id: string;
   chat(req: ResolvedChatRequest, signal: AbortSignal): AsyncIterable<ChatChunk>;
+  listModels?(signal?: AbortSignal): Promise<string[]>;
   shutdown?(): void;
   status(): Promise<AdapterStatus>;
 }

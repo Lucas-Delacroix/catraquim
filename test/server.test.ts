@@ -119,4 +119,27 @@ describe('OpenAPI docs', () => {
       },
     });
   });
+
+  it('returns structured authentication errors from middleware', async () => {
+    const app = createApp(
+      createServerContext({
+        ...defaultConfig,
+        server: {
+          ...defaultConfig.server,
+          token: 'secret-token',
+        },
+      })
+    );
+    const response = await app.request('/healthz');
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'invalid_bearer_token',
+        message: 'Unauthorized',
+        transient: false,
+        type: 'authentication_error',
+      },
+    });
+  });
 });

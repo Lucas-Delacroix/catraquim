@@ -9,6 +9,9 @@ import { loadConfig, resolvedConfigPaths } from '../src/config/loader.js';
 const tempDirs: string[] = [];
 const originalCwd = process.cwd();
 const originalConfigEnv = process.env.CATRAQUIM_CONFIG;
+const originalCodexBinaryEnv = process.env.CATRAQUIM_CODEX_BINARY;
+const originalPortEnv = process.env.CATRAQUIM_PORT;
+const originalTokenEnv = process.env.CATRAQUIM_TOKEN;
 
 const createTempDir = () => {
   const dir = mkdtempSync(join(tmpdir(), 'catraquim-loader-'));
@@ -23,6 +26,24 @@ afterEach(() => {
     process.env.CATRAQUIM_CONFIG = undefined;
   } else {
     process.env.CATRAQUIM_CONFIG = originalConfigEnv;
+  }
+
+  if (originalCodexBinaryEnv === undefined) {
+    process.env.CATRAQUIM_CODEX_BINARY = undefined;
+  } else {
+    process.env.CATRAQUIM_CODEX_BINARY = originalCodexBinaryEnv;
+  }
+
+  if (originalPortEnv === undefined) {
+    process.env.CATRAQUIM_PORT = undefined;
+  } else {
+    process.env.CATRAQUIM_PORT = originalPortEnv;
+  }
+
+  if (originalTokenEnv === undefined) {
+    process.env.CATRAQUIM_TOKEN = undefined;
+  } else {
+    process.env.CATRAQUIM_TOKEN = originalTokenEnv;
   }
 
   for (const dir of tempDirs.splice(0)) {
@@ -111,5 +132,42 @@ describe('config loader', () => {
       binary: 'custom-codex',
       homePath: expect.stringContaining('legacy-codex'),
     });
+  });
+
+  it('applies env overrides after merging file config', () => {
+    const dir = createTempDir();
+    const configDir = join(dir, 'nested');
+    const explicitPath = join(configDir, 'gateway.json');
+    mkdirSync(configDir, { recursive: true });
+
+    writeFileSync(
+      explicitPath,
+      JSON.stringify({
+        providers: {
+          codex: {
+            type: 'codex',
+            binary: 'custom-codex',
+            homePath: '~/.custom-codex',
+          },
+        },
+        server: {
+          port: 5151,
+          token: 'from-file',
+        },
+      }),
+      'utf8'
+    );
+
+    process.env.CATRAQUIM_CONFIG = explicitPath;
+    process.env.CATRAQUIM_CODEX_BINARY = 'env-codex';
+    process.env.CATRAQUIM_PORT = '6161';
+    process.env.CATRAQUIM_TOKEN = 'from-env';
+
+    const config = loadConfig();
+
+    expect(config.providers.codex.binary).toBe('env-codex');
+    expect(config.providers.codex.homePath).toContain('.custom-codex');
+    expect(config.server.port).toBe(6161);
+    expect(config.server.token).toBe('from-env');
   });
 });

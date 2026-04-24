@@ -1,7 +1,7 @@
 # catraquim
 
 <p align="center">
-  <strong>Gateway local que expõe o Codex como uma API compatível com OpenAI.</strong>
+  <strong>Gateway local que expõe Codex e Claude Code como uma API compatível com OpenAI.</strong>
 </p>
 
 <p align="center">
@@ -14,17 +14,18 @@
   <a href="https://github.com/Lucas-Delacroix/catraquim/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Lucas-Delacroix/catraquim" alt="License" /></a>
   <img src="https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white" alt="Node.js >= 20" />
   <img src="https://img.shields.io/badge/typescript-5.x-3178C6?logo=typescript&logoColor=white" alt="TypeScript 5" />
-  <img src="https://img.shields.io/badge/openapi-documented-6BA539" 
+  <img src="https://img.shields.io/badge/openapi-documented-6BA539" alt="OpenAPI documented" />
   <img src="https://img.shields.io/badge/tests-vitest-729B1B?logo=vitest&logoColor=white" alt="Vitest" />
 </p>
 
 ## Visao geral
 
-O `catraquim` funciona como uma camada HTTP local sobre o Codex, expondo endpoints no formato esperado por clientes compatíveis com OpenAI. Isso permite apontar ferramentas, scripts e integrações existentes para um `baseURL` local, sem reinventar o protocolo.
+O `catraquim` funciona como uma camada HTTP local sobre CLIs de agentes, expondo endpoints no formato esperado por clientes compatíveis com OpenAI. Isso permite apontar ferramentas, scripts e integrações existentes para um `baseURL` local, sem reinventar o protocolo.
 
 ## Destaques
 
 - API compatível com OpenAI para `chat completions` e listagem de modelos.
+- Providers locais para Codex e Claude Code.
 - Aliases de modelos configuráveis, desacoplando o nome exposto do nome real no provider.
 - Documentação em `/docs` e especificação OpenAPI em `/openapi.json`.
 - Middleware opcional com bearer token.
@@ -49,14 +50,29 @@ O `catraquim` funciona como uma camada HTTP local sobre o Codex, expondo endpoin
 Antes de iniciar, garanta que o ambiente tenha:
 
 - Node.js 20 ou superior
-- `pnpm`
+- `npm`, normalmente instalado junto com o Node.js
+- `git`, para a instalacao rapida via script
+- `pnpm`, opcional para instalacao manual ou desenvolvimento
 - binario `codex` disponivel no `PATH`
+- binario `claude` disponivel no `PATH`, se for usar Claude Code
 - autenticacao valida em `~/.codex`
+- autenticacao valida em `~/.claude`, se for usar Claude Code
 
 ## Instalacao
 
+Instalacao rapida via script:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lucas-Delacroix/catraquim/main/scripts/install.sh | bash -s -- --install-method git
+```
+
+O script clona o repositorio em `~/.local/share/catraquim`, instala dependencias com `pnpm`, executa `pnpm build` e cria o binario `~/.local/bin/catraquim`. Se `pnpm` nao estiver instalado, o script tenta usar `corepack`; se tambem nao houver `corepack`, usa `npm exec pnpm@10.8.1`.
+
+Instalacao manual a partir do checkout do repositorio:
+
 ```bash
 pnpm install
+pnpm build
 ```
 
 ## Quick Start
@@ -64,19 +80,19 @@ pnpm install
 1. Gere a configuracao inicial:
 
 ```bash
-pnpm exec tsx src/cli.ts config:init
+catraquim config:init
 ```
 
 2. Se preferir, abra o assistente interativo:
 
 ```bash
-pnpm exec tsx src/cli.ts config:setup
+catraquim config:setup
 ```
 
 3. Suba o gateway local:
 
 ```bash
-pnpm start
+catraquim start
 ```
 
 4. Acesse a documentacao:
@@ -85,13 +101,7 @@ pnpm start
 http://127.0.0.1:4141/docs
 ```
 
-## Comandos
 
-Se estiver rodando a partir do checkout do repositorio, use:
-
-```bash
-pnpm exec tsx src/cli.ts <comando>
-```
 
 Comandos disponiveis:
 
@@ -134,6 +144,14 @@ Exemplo:
     "token": null
   },
   "models": {
+    "claude-opus": {
+      "adapter": "claude-code",
+      "upstreamModel": "claude-opus-4-7"
+    },
+    "claude-sonnet": {
+      "adapter": "claude-code",
+      "upstreamModel": "claude-sonnet-4-6"
+    },
     "codex-max": {
       "adapter": "codex",
       "upstreamModel": "codex-max"
@@ -144,7 +162,13 @@ Exemplo:
     }
   },
   "providers": {
+    "claude-code": {
+      "type": "claude-code",
+      "binary": "claude",
+      "homePath": "~/.claude"
+    },
     "codex": {
+      "type": "codex",
       "binary": "codex",
       "homePath": "~/.codex"
     }
@@ -154,15 +178,18 @@ Exemplo:
 
 Notas:
 
-- `codex-max` e `codex-mini` sao aliases do gateway. Ajuste `upstreamModel` se o seu ambiente usar outros nomes.
+- `codex-max`, `codex-mini`, `claude-opus` e `claude-sonnet` sao aliases do gateway. Ajuste `upstreamModel` se o seu ambiente usar outros nomes.
+- O provider `claude-code` segue o mesmo padrao do OpenClaw: chama `claude -p --output-format stream-json` e limpa variaveis Anthropic/Claude herdadas para usar a autenticacao local do Claude Code.
 - Se `server.token` for definido, todas as rotas passam a exigir `Authorization: Bearer <token>`.
-- O endpoint de `stream` ainda nao esta implementado. Requisicoes com `"stream": true` retornam `501`.
+- Requisicoes com `"stream": true` retornam a resposta no formato SSE (`text/event-stream`), compativel com clientes OpenAI.
 
 Variaveis de ambiente suportadas:
 
 - `CATRAQUIM_PORT`
 - `CATRAQUIM_TOKEN`
 - `CATRAQUIM_CODEX_BINARY`
+- `CATRAQUIM_CLAUDE_CODE_BINARY`
+- `CATRAQUIM_CLAUDE_BINARY`
 
 ## Exemplo de uso
 

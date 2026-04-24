@@ -3,108 +3,101 @@ import { logger } from '../../logger.js';
 import type { CodexAppServerClient } from './app-server.js';
 
 const DISCOVERY_TIMEOUT_MS = 5_000;
+const RPC_METHOD = 'model/list';
+const MAX_PAGES = 20;
 
-const RPC_METHODS = ['listModels', 'model/list', 'models/list'] as const;
-
-interface ModelEntry {
-  id?: unknown;
-  name?: unknown;
-  slug?: unknown;
-  model?: unknown;
+interface ListCodexModelsOptions {
+  includeHidden?: boolean;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
-const isModelEntry = (value: unknown): value is ModelEntry =>
-  typeof value === 'object' && value !== null;
+interface RawModelEntry {
+  id?: unknown;
+  model?: unknown;
+  hidden?: unknown;
+}
 
-const extractModelId = (entry: ModelEntry): string | null => {
-  for (const candidate of [entry.id, entry.slug, entry.name, entry.model]) {
-    if (typeof candidate === 'string' && candidate.trim().length > 0) {
-      return candidate.trim();
-    }
-  }
-  return null;
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const readNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 };
 
-const extractEntries = (result: unknown): ModelEntry[] => {
-  if (Array.isArray(result)) {
-    return result.filter(isModelEntry);
+const extractModelId = (entry: RawModelEntry): string | null =>
+  readNonEmptyString(entry.id) ?? readNonEmptyString(entry.model);
+
+interface Page {
+  ids: string[];
+  nextCursor: string | null;
+}
+
+const readPage = (result: unknown, includeHidden: boolean): Page => {
+  if (!isObject(result) || !Array.isArray(result.data)) {
+    return { ids: [], nextCursor: null };
   }
 
-  if (typeof result !== 'object' || result === null) {
-    return [];
+  const ids: string[] = [];
+  for (const rawEntry of result.data) {
+    if (!isObject(rawEntry)) continue;
+    if (!includeHidden && rawEntry.hidden === true) continue;
+
+    const id = extractModelId(rawEntry as RawModelEntry);
+    if (id) ids.push(id);
   }
 
-  const record = result as Record<string, unknown>;
-  for (const key of ['models', 'data', 'items']) {
-    const value = record[key];
-    if (Array.isArray(value)) {
-      return value.filter(isModelEntry);
-    }
-  }
-
-  return [];
-};
-
-const isMethodNotFoundError = (error: unknown): boolean => {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return (
-    message.includes('method not found') ||
-    message.includes('unknown method') ||
-    message.includes('unsupported method')
-  );
+  const nextCursor = readNonEmptyString(result.nextCursor);
+  return { ids, nextCursor };
 };
 
 export const listCodexModels = async (
   client: CodexAppServerClient,
-  options: { signal?: AbortSignal; timeoutMs?: number } = {}
+  options: ListCodexModelsOptions = {}
 ): Promise<string[]> => {
   const timeoutMs = options.timeoutMs ?? DISCOVERY_TIMEOUT_MS;
-  const attemptErrors: Error[] = [];
+  const includeHidden = options.includeHidden ?? false;
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null;
 
-  for (const method of RPC_METHODS) {
-    try {
-      const result = await client.request(method, undefined, {
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const result = await client.request(
+      RPC_METHOD,
+      {
+        cursor,
+        includeHidden,
+        limit: null,
+      },
+      {
         signal: options.signal,
         timeoutMs,
-      });
-
-      const ids = extractEntries(result)
-        .map(extractModelId)
-        .filter((id): id is string => id !== null);
-
-      if (ids.length === 0) {
-        throw AppError.provider(
-          `Codex ${method} returned no entries`,
-          502,
-          undefined,
-          { code: 'list_models_empty' }
-        );
       }
+    );
 
-      logger.debug({ count: ids.length, method }, 'codex list-models resolved');
-      return ids;
-    } catch (error) {
-      if (!isMethodNotFoundError(error)) {
-        throw error instanceof AppError
-          ? error
-          : AppError.provider(
-              error instanceof Error
-                ? error.message
-                : 'Codex list-models failed',
-              502,
-              error,
-              { code: 'list_models_failed' }
-            );
-      }
-      if (error instanceof Error) attemptErrors.push(error);
+    const current = readPage(result, includeHidden);
+
+    for (const id of current.ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
     }
+
+    if (!current.nextCursor) break;
+    cursor = current.nextCursor;
   }
 
-  throw AppError.provider(
-    'Codex app-server does not support model discovery',
-    502,
-    attemptErrors.at(-1),
-    { code: 'list_models_unsupported' }
-  );
+  if (ids.length === 0) {
+    throw AppError.provider(
+      `Codex ${RPC_METHOD} returned no entries`,
+      502,
+      undefined,
+      { code: 'list_models_empty' }
+    );
+  }
+
+  logger.debug({ count: ids.length }, 'codex list-models resolved');
+  return ids;
 };

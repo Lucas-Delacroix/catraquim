@@ -1,6 +1,7 @@
 import type { CodexProviderConfig } from '../../config/schema.js';
 import { AppError } from '../../errors.js';
 import { logger } from '../../logger.js';
+import { codexRpcInitializeResultSchema } from './rpc-schemas.js';
 import { CodexRpcTransport } from './rpc-transport.js';
 import type { CodexRpcNotificationMessage } from './types.js';
 
@@ -60,7 +61,7 @@ export class CodexAppServerClient {
   private async runInitialize(): Promise<void> {
     this.transport.start();
 
-    const result = (await this.transport.request(
+    const raw = await this.transport.request(
       'initialize',
       {
         capabilities: { experimentalApi: true },
@@ -71,9 +72,21 @@ export class CodexAppServerClient {
         },
       },
       { timeoutMs: INITIALIZE_TIMEOUT_MS }
-    )) as { userAgent?: string } | undefined;
+    );
+    const parsed = codexRpcInitializeResultSchema.safeParse(raw);
 
-    const userAgent = result?.userAgent ?? '';
+    if (!parsed.success) {
+      throw AppError.provider(
+        'Invalid Codex initialize response',
+        502,
+        parsed.error,
+        {
+          code: 'invalid_initialize_response',
+        }
+      );
+    }
+
+    const userAgent = parsed.data?.userAgent ?? '';
     const version = userAgent ? parseVersion(userAgent) : null;
 
     if (version && !versionAtLeast(version, MIN_SERVER_VERSION)) {

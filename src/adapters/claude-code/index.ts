@@ -6,7 +6,6 @@ import type {
   ChatChunk,
   ResolvedChatRequest,
 } from '../base.js';
-import { listClaudeCodeModels } from './list-models.js';
 import { runClaudeCode } from './run.js';
 
 export class ClaudeCodeAdapter implements Adapter {
@@ -26,10 +25,6 @@ export class ClaudeCodeAdapter implements Adapter {
       finishReason: 'stop',
       usage: result.usage,
     };
-  }
-
-  public listModels(signal?: AbortSignal): Promise<string[]> {
-    return listClaudeCodeModels(this.config, { signal });
   }
 
   public async status(): Promise<AdapterStatus> {

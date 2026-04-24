@@ -1,17 +1,17 @@
 import { AppError } from '../../errors.js';
 import { logger } from '../../logger.js';
 import type { CodexAppServerClient } from './app-server.js';
+import {
+  type CodexTurn,
+  codexLegacyTurnResultSchema,
+  codexNestedTurnResultSchema,
+  codexRpcThreadStartResultSchema,
+  codexTurnCompletedParamsSchema,
+} from './rpc-schemas.js';
 import type { CodexRpcNotificationMessage } from './types.js';
 
 export interface TurnResult {
   text: string;
-}
-
-interface CodexTurn {
-  error?: unknown;
-  id: string;
-  items?: Array<Record<string, unknown>>;
-  status: string;
 }
 
 function parseEmbeddedErrorMessage(raw: string): string {
@@ -134,29 +134,20 @@ function extractTurnItemsText(
 }
 
 function normalizeTurnResponse(raw: unknown): CodexTurn | undefined {
-  if (typeof raw !== 'object' || raw === null) {
-    return undefined;
+  const nestedTurn = codexNestedTurnResultSchema.safeParse(raw);
+  if (nestedTurn.success) {
+    return nestedTurn.data.turn;
   }
 
-  const nestedTurn = (raw as { turn?: CodexTurn }).turn;
-  if (nestedTurn) {
-    return nestedTurn;
-  }
-
-  const legacy = raw as {
-    output?: Array<Record<string, unknown>>;
-    status?: string;
-    turnId?: string;
-  };
-
-  if (typeof legacy.status !== 'string') {
+  const legacy = codexLegacyTurnResultSchema.safeParse(raw);
+  if (!legacy.success) {
     return undefined;
   }
 
   return {
-    id: legacy.turnId ?? '',
-    items: legacy.output,
-    status: legacy.status,
+    id: legacy.data.turnId ?? '',
+    items: legacy.data.output,
+    status: legacy.data.status,
   };
 }
 
@@ -202,12 +193,25 @@ export async function runTurn(
   turnBaseParams: Record<string, unknown>,
   signal: AbortSignal
 ): Promise<TurnResult> {
-  const threadResult = (await client.request('thread/start', threadParams, {
+  const rawThreadResult = await client.request('thread/start', threadParams, {
     signal,
     timeoutMs: 30_000,
-  })) as { thread: { id: string } };
+  });
+  const threadResult =
+    codexRpcThreadStartResultSchema.safeParse(rawThreadResult);
 
-  const threadId = threadResult.thread.id;
+  if (!threadResult.success) {
+    throw AppError.provider(
+      'Invalid Codex thread/start response',
+      502,
+      threadResult.error,
+      {
+        code: 'invalid_thread_start_response',
+      }
+    );
+  }
+
+  const threadId = threadResult.data.thread.id;
   let turnId: string | undefined;
 
   return new Promise((resolve, reject) => {
@@ -255,7 +259,8 @@ export async function runTurn(
         return;
       }
 
-      const turn = params?.turn as CodexTurn | undefined;
+      const parsedParams = codexTurnCompletedParamsSchema.safeParse(params);
+      const turn = parsedParams.success ? parsedParams.data.turn : undefined;
       if (turn && isTerminalFailureStatus(turn.status)) {
         rejectTurn(errorForTurnStatus(turn));
         return;

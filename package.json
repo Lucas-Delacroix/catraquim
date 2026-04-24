@@ -8,6 +8,14 @@
   },
   "main": "./dist/cli.js",
   "files": ["dist"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lucas-Delacroix/catraquim.git"
+  },
+  "homepage": "https://github.com/Lucas-Delacroix/catraquim#readme",
+  "bugs": {
+    "url": "https://github.com/Lucas-Delacroix/catraquim/issues"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -15,6 +23,7 @@
     "build": "tsup src/cli.ts --format esm --target node20 --dts --clean",
     "check": "biome check .",
     "dev": "tsx scripts/dev.ts",
+    "install:check": "bash -n scripts/install.sh",
     "start": "tsx src/cli.ts start",
     "test": "vitest run"
   },
@@ -33,7 +42,12 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/typescript-checker": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@types/node": "^22.10.1",
+    "@vitest/coverage-v8": "^2.1.9",
+    "dependency-cruiser": "^17.3.10",
     "pino-pretty": "^13.0.0",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",

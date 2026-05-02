@@ -8,8 +8,8 @@ import type {
 } from '../base.js';
 import { CodexAppServerClient } from './app-server.js';
 import { listCodexModels } from './list-models.js';
-import { runTurn } from './run-turn.js';
-import { toThreadStartParams, toTurnBaseParams } from './translate.js';
+import { toThreadStartParams, toTurnBaseParams } from './request-mapper.js';
+import { runTurn } from './turn-runner.js';
 
 export class CodexAdapter implements Adapter {
   private readonly rpcClient: CodexAppServerClient;
@@ -25,13 +25,10 @@ export class CodexAdapter implements Adapter {
     req: ResolvedChatRequest,
     signal: AbortSignal
   ): AsyncIterable<ChatChunk> {
-    const threadParams = toThreadStartParams(req.upstreamModel);
-    const turnParams = toTurnBaseParams(req, req.upstreamModel);
-
     const result = await runTurn(
       this.rpcClient,
-      threadParams as unknown as Record<string, unknown>,
-      turnParams as unknown as Record<string, unknown>,
+      toThreadStartParams(req.upstreamModel),
+      toTurnBaseParams(req, req.upstreamModel),
       signal
     );
 

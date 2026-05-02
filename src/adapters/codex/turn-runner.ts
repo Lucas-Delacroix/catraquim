@@ -95,10 +95,6 @@ function extractTextFragments(value: unknown): string[] {
     return value.flatMap((item) => extractTextFragments(item));
   }
 
-  if (typeof value !== 'object' || value === null) {
-    return [];
-  }
-
   const record = toRecord(value);
   if (!record) {
     return [];
@@ -189,8 +185,8 @@ function pushFinalText(
 
 export async function runTurn(
   client: CodexAppServerClient,
-  threadParams: Record<string, unknown>,
-  turnBaseParams: Record<string, unknown>,
+  threadParams: unknown,
+  turnBaseParams: unknown,
   signal: AbortSignal
 ): Promise<TurnResult> {
   const rawThreadResult = await client.request('thread/start', threadParams, {
@@ -292,7 +288,7 @@ export async function runTurn(
     client
       .request(
         'turn/start',
-        { ...turnBaseParams, threadId },
+        { ...(turnBaseParams as Record<string, unknown>), threadId },
         { signal, timeoutMs: 30_000 }
       )
       .then((raw) => {

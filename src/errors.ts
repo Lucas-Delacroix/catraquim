@@ -17,7 +17,6 @@ export interface AppErrorMetadata {
 }
 
 interface ErrorFactoryDefaults {
-  statusCode: number;
   transient?: boolean;
   type: AppErrorType;
 }
@@ -89,7 +88,7 @@ export class AppError extends Error {
     metadata: AppErrorMetadata,
     defaults: ErrorFactoryDefaults
   ) {
-    return new AppError(message, statusCode ?? defaults.statusCode, cause, {
+    return new AppError(message, statusCode, cause, {
       ...metadata,
       transient: metadata.transient ?? defaults.transient,
       type: defaults.type,
@@ -103,7 +102,6 @@ export class AppError extends Error {
     metadata: AppErrorMetadata = {}
   ) {
     return AppError.typed(message, statusCode, cause, metadata, {
-      statusCode: 401,
       type: 'authentication_error',
     });
   }
@@ -115,7 +113,6 @@ export class AppError extends Error {
     metadata: AppErrorMetadata = {}
   ) {
     return AppError.typed(message, statusCode, cause, metadata, {
-      statusCode: 400,
       type: 'compatibility_error',
     });
   }
@@ -127,7 +124,6 @@ export class AppError extends Error {
     metadata: AppErrorMetadata = {}
   ) {
     return AppError.typed(message, statusCode, cause, metadata, {
-      statusCode: 500,
       type: 'configuration_error',
     });
   }
@@ -139,7 +135,6 @@ export class AppError extends Error {
     metadata: AppErrorMetadata = {}
   ) {
     return AppError.typed(message, statusCode, cause, metadata, {
-      statusCode: 502,
       type: 'provider_error',
     });
   }
@@ -151,7 +146,6 @@ export class AppError extends Error {
     metadata: AppErrorMetadata = {}
   ) {
     return AppError.typed(message, statusCode, cause, metadata, {
-      statusCode: 504,
       transient: true,
       type: 'transient_error',
     });

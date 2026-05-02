@@ -76,7 +76,7 @@ const looksLikeLegacyCodexProvider = (
 const normalizeProviderValue = (
   providerValue: Record<string, unknown>
 ): ProviderConfig => {
-  const { codexHomeSource, homePath, type, ...providerRest } = providerValue;
+  const { codexHomeSource, homePath, ...providerRest } = providerValue;
 
   return {
     ...providerRest,
@@ -86,7 +86,7 @@ const normalizeProviderValue = (
         : typeof codexHomeSource === 'string'
           ? codexHomeSource
           : undefined,
-    type: type === 'codex' ? type : 'codex',
+    type: 'codex',
   } as ProviderConfig;
 };
 

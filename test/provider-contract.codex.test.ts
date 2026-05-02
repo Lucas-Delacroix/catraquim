@@ -3,7 +3,7 @@ import { beforeEach, vi } from 'vitest';
 const runTurnMock = vi.hoisted(() => vi.fn());
 const getCodexAuthStatusMock = vi.hoisted(() => vi.fn());
 
-vi.mock('../src/adapters/codex/run-turn.js', () => ({
+vi.mock('../src/adapters/codex/turn-runner.js', () => ({
   runTurn: runTurnMock,
 }));
 

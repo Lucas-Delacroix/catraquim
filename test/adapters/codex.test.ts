@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CodexAppServerClient } from '../../src/adapters/codex/app-server.js';
 import { prepareCodexHome } from '../../src/adapters/codex/auth-bridge.js';
 import { CodexAdapter } from '../../src/adapters/codex/index.js';
-import { runTurn } from '../../src/adapters/codex/run-turn.js';
+import { runTurn } from '../../src/adapters/codex/turn-runner.js';
 import {
   isRpcNotification,
   isRpcRequest,

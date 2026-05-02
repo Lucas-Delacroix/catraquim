@@ -59,38 +59,32 @@ const applyEnvOverrides = (config: AppConfig): AppConfig => {
     'claude-code'
   );
   const codexProvider = findFirstProviderByType(config.providers, 'codex');
+  const providers: AppConfig['providers'] = {};
+
+  if (claudeCodeProvider) {
+    providers[claudeCodeProvider.id] = {
+      ...claudeCodeProvider.config,
+      binary:
+        readOptionalEnv('CATRAQUIM_CLAUDE_CODE_BINARY') ??
+        readOptionalEnv('CATRAQUIM_CLAUDE_BINARY') ??
+        claudeCodeProvider.config.binary,
+      homePath: expandHome(claudeCodeProvider.config.homePath),
+    };
+  }
+
+  if (codexProvider) {
+    providers[codexProvider.id] = {
+      ...codexProvider.config,
+      binary:
+        readOptionalEnv('CATRAQUIM_CODEX_BINARY') ??
+        codexProvider.config.binary,
+      homePath: expandHome(codexProvider.config.homePath),
+    };
+  }
 
   return mergeConfig(config, {
-    providers:
-      claudeCodeProvider || codexProvider
-        ? {
-            ...(claudeCodeProvider
-              ? {
-                  [claudeCodeProvider.id]: {
-                    ...claudeCodeProvider.config,
-                    binary:
-                      readOptionalEnv('CATRAQUIM_CLAUDE_CODE_BINARY') ??
-                      readOptionalEnv('CATRAQUIM_CLAUDE_BINARY') ??
-                      claudeCodeProvider.config.binary,
-                    homePath: expandHome(claudeCodeProvider.config.homePath),
-                  },
-                }
-              : {}),
-            ...(codexProvider
-              ? {
-                  [codexProvider.id]: {
-                    ...codexProvider.config,
-                    binary:
-                      readOptionalEnv('CATRAQUIM_CODEX_BINARY') ??
-                      codexProvider.config.binary,
-                    homePath: expandHome(codexProvider.config.homePath),
-                  },
-                }
-              : {}),
-          }
-        : undefined,
+    providers,
     server: {
-      host: config.server.host,
       port: Number(readOptionalEnv('CATRAQUIM_PORT') ?? config.server.port),
       token: readOptionalEnv('CATRAQUIM_TOKEN') ?? config.server.token,
     },

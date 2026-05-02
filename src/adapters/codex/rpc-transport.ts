@@ -14,7 +14,6 @@ import {
 
 interface PendingRequest {
   abortCleanup?: () => void;
-  phase: 'handshake' | 'processing';
   reject: (error: Error) => void;
   resolve: (result: unknown) => void;
   timer?: ReturnType<typeof setTimeout>;
@@ -25,13 +24,6 @@ interface ProcessStreams {
   stdin: NonNullable<ChildProcess['stdin']>;
   stdout: NonNullable<ChildProcess['stdout']>;
 }
-
-type TransportState =
-  | 'idle'
-  | 'handshaking'
-  | 'ready'
-  | 'processing'
-  | 'shutdown';
 
 const SERVER_REQUEST_DEFAULTS: Record<string, unknown> = {
   'item/commandExecution/requestApproval': { decision: 'decline' },
@@ -57,10 +49,7 @@ const buildChildEnv = (
 };
 
 export class CodexRpcTransport {
-  private activeProcessingRequests = 0;
-  private activeHandshakeRequests = 0;
   private exitHandlers: Array<() => void> = [];
-  private handshakeComplete = false;
   private nextId = 1;
   private proc?: ChildProcess;
   private processCleanup?: () => void;
@@ -68,38 +57,8 @@ export class CodexRpcTransport {
   private notificationHandlers: Array<
     (msg: CodexRpcNotificationMessage) => void
   > = [];
-  private shutdownRequested = false;
-  private state: TransportState = 'idle';
 
   public constructor(private readonly config: CodexProviderConfig) {}
-
-  private setState(next: TransportState) {
-    this.state = next;
-  }
-
-  private syncState() {
-    if (this.shutdownRequested) {
-      this.setState('shutdown');
-      return;
-    }
-
-    if (!this.proc || this.proc.killed) {
-      this.setState('idle');
-      return;
-    }
-
-    if (!this.handshakeComplete || this.activeHandshakeRequests > 0) {
-      this.setState('handshaking');
-      return;
-    }
-
-    if (this.activeProcessingRequests > 0) {
-      this.setState('processing');
-      return;
-    }
-
-    this.setState('ready');
-  }
 
   private isRunning() {
     return this.proc && !this.proc.killed;
@@ -136,23 +95,6 @@ export class CodexRpcTransport {
     this.pendingRequests.delete(id);
     clearTimeout(pending.timer);
     pending.abortCleanup?.();
-
-    if (pending.phase === 'handshake') {
-      this.activeHandshakeRequests = Math.max(
-        0,
-        this.activeHandshakeRequests - 1
-      );
-      if (!error) {
-        this.handshakeComplete = true;
-      }
-    } else {
-      this.activeProcessingRequests = Math.max(
-        0,
-        this.activeProcessingRequests - 1
-      );
-    }
-
-    this.syncState();
 
     if (error) {
       pending.reject(error);
@@ -263,8 +205,6 @@ export class CodexRpcTransport {
 
       this.proc = undefined;
       this.processCleanup = undefined;
-      this.handshakeComplete = false;
-      this.syncState();
       for (const handler of [...this.exitHandlers]) {
         handler();
       }
@@ -285,10 +225,6 @@ export class CodexRpcTransport {
   public start(): void {
     if (this.isRunning()) return;
 
-    this.shutdownRequested = false;
-    this.handshakeComplete = false;
-    this.setState('handshaking');
-
     const isWindows = process.platform === 'win32';
 
     this.proc = spawn(
@@ -301,7 +237,6 @@ export class CodexRpcTransport {
       }
     );
     this.attachProcessListeners(this.requireProcessStreams(this.proc));
-    this.syncState();
   }
 
   public onExit(handler: () => void): () => void {
@@ -385,10 +320,6 @@ export class CodexRpcTransport {
   ): Promise<unknown> {
     const id = this.nextId++;
     const payload = JSON.stringify({ id, method, params });
-    const phase =
-      method === 'initialize' || !this.handshakeComplete
-        ? 'handshake'
-        : 'processing';
 
     return new Promise((resolve, reject) => {
       if (opts?.signal?.aborted) {
@@ -402,12 +333,6 @@ export class CodexRpcTransport {
           }, opts.timeoutMs)
         : undefined;
 
-      if (phase === 'handshake') {
-        this.activeHandshakeRequests += 1;
-      } else {
-        this.activeProcessingRequests += 1;
-      }
-
       const abortHandler = () => {
         this.completePendingRequest(id, this.rpcAbortError(method));
       };
@@ -417,12 +342,10 @@ export class CodexRpcTransport {
       this.pendingRequests.set(id, {
         abortCleanup: () =>
           opts?.signal?.removeEventListener('abort', abortHandler),
-        phase,
         reject,
         resolve,
         timer,
       });
-      this.syncState();
 
       const stdin = this.proc?.stdin;
       if (!stdin) {
@@ -454,8 +377,6 @@ export class CodexRpcTransport {
     const proc = this.proc;
     if (!proc || proc.killed) return;
 
-    this.shutdownRequested = true;
-    this.syncState();
     this.rejectAllPending(() => this.appServerNotRunningError());
     this.processCleanup?.();
     this.processCleanup = undefined;
@@ -466,32 +387,25 @@ export class CodexRpcTransport {
     proc.stdout?.destroy();
     proc.stderr?.destroy();
 
-    let groupKilled = false;
-    if (!isWindows && proc.pid) {
+    const killGroup = (signal: NodeJS.Signals) => {
+      if (isWindows || !proc.pid) return false;
       try {
-        process.kill(-proc.pid, 'SIGTERM');
-        groupKilled = true;
+        process.kill(-proc.pid, signal);
+        return true;
       } catch {
-        // process group already gone
+        return false;
       }
-    }
+    };
 
-    if (!groupKilled) {
+    if (!killGroup('SIGTERM')) {
       proc.kill('SIGTERM');
     }
 
     const timer = setTimeout(() => {
       if (proc.killed) return;
-      if (!isWindows && proc.pid) {
-        try {
-          process.kill(-proc.pid, 'SIGKILL');
-          return;
-        } catch {
-          // fall through
-        }
+      if (!killGroup('SIGKILL')) {
+        proc.kill('SIGKILL');
       }
-
-      proc.kill('SIGKILL');
     }, 1000);
 
     timer.unref();

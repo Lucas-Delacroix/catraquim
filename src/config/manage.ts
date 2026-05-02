@@ -27,10 +27,8 @@ export interface InitConfigOptions {
   force?: boolean;
 }
 
-const configPath = () => homeConfigPath();
-
 export const initConfig = ({
-  filePath = configPath(),
+  filePath = homeConfigPath(),
   force = false,
 }: InitConfigOptions = {}) => {
   const alreadyExists = existsSync(filePath);
@@ -49,9 +47,9 @@ export const initConfig = ({
   };
 };
 
-export const getConfigPath = () => configPath();
+export const getConfigPath = () => homeConfigPath();
 
-export const validateConfig = (filePath = configPath()) => {
+export const validateConfig = (filePath = homeConfigPath()) => {
   if (!existsSync(filePath)) {
     throw new AppError(`Config file not found at ${filePath}`, 404);
   }
@@ -69,7 +67,7 @@ export interface EditConfigOptions {
 
 export const editConfig = ({
   editor = process.env.EDITOR,
-  filePath = configPath(),
+  filePath = homeConfigPath(),
 }: EditConfigOptions = {}) => {
   if (!editor) {
     throw new AppError('EDITOR is not set', 400);
@@ -286,7 +284,7 @@ export interface SetupConfigOptions {
 }
 
 export const setupConfig = async ({
-  filePath = configPath(),
+  filePath = homeConfigPath(),
   input = process.stdin,
   output = process.stdout,
   promptApi,

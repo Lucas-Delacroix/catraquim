@@ -48,9 +48,24 @@ export const toolDefinitionSchema = z
   .openapi('ToolDefinition');
 export type ToolDefinitionInput = z.infer<typeof toolDefinitionSchema>;
 
+const textContentPartSchema = z.object({
+  type: z.literal('text'),
+  text: z.string(),
+});
+
+const imageContentPartSchema = z.object({
+  type: z.literal('image_url'),
+  image_url: z.object({ url: z.string() }),
+});
+
+const contentPartSchema = z.discriminatedUnion('type', [
+  textContentPartSchema,
+  imageContentPartSchema,
+]);
+
 export const chatMessageSchema = z
   .object({
-    content: z.string(),
+    content: z.union([z.string(), z.array(contentPartSchema)]),
     role: z.enum(['system', 'user', 'assistant', 'tool']),
     toolCallId: z.string().optional(),
   })
@@ -62,6 +77,9 @@ export const chatCompletionRequestSchema = z
     max_tokens: positiveInt.optional(),
     messages: z.array(chatMessageSchema).min(1),
     model: nonEmptyString,
+    reasoning_effort: z
+      .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+      .optional(),
     stream: z.boolean().default(false),
     temperature: z.number().min(0).max(2).optional(),
     tools: z.array(toolDefinitionSchema).optional(),

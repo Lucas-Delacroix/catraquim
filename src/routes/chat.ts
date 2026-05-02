@@ -1,8 +1,9 @@
 import type { OpenAPIHono } from '@hono/zod-openapi';
+import { streamSSE } from 'hono/streaming';
 
 import {
-  createNotImplementedStreamPayload,
   toOpenAiChatCompletion,
+  toOpenAiStreamChunk,
 } from '../sse/openai-stream.js';
 import type { CompleteChatUseCase } from '../usecases/complete-chat.js';
 import {
@@ -30,32 +31,49 @@ const chatCompletionsRoute = createApiRoute({
   tag: 'Chat',
 });
 
+const generateCompletionId = () =>
+  `chatcmpl_${Math.random().toString(36).slice(2, 11)}`;
+
 export const registerChatRoutes = (
   app: OpenAPIHono,
   completeChat: CompleteChatUseCase
 ) => {
   app.openapi(chatCompletionsRoute, async (c) => {
     const body = c.req.valid('json');
+    const chatRequest = {
+      maxTokens: body.max_tokens,
+      messages: body.messages,
+      model: body.model,
+      reasoningEffort: body.reasoning_effort,
+      stream: body.stream,
+      temperature: body.temperature,
+      tools: body.tools,
+    };
 
     if (body.stream) {
       const binding = completeChat.resolveModel(body.model);
-      return c.json(
-        createNotImplementedStreamPayload(body.model, binding),
-        501
-      );
+      const canonicalModel = binding?.canonicalModel ?? body.model;
+      const id = generateCompletionId();
+
+      return streamSSE(c, async (stream) => {
+        try {
+          for await (const chunk of completeChat.stream(
+            chatRequest,
+            c.req.raw.signal
+          )) {
+            await stream.writeSSE({
+              data: JSON.stringify(
+                toOpenAiStreamChunk(chunk, canonicalModel, id)
+              ),
+            });
+          }
+        } finally {
+          await stream.writeSSE({ data: '[DONE]' });
+        }
+      });
     }
 
-    const result = await completeChat.execute(
-      {
-        maxTokens: body.max_tokens,
-        messages: body.messages,
-        model: body.model,
-        stream: false,
-        temperature: body.temperature,
-        tools: body.tools,
-      },
-      c.req.raw.signal
-    );
+    const result = await completeChat.execute(chatRequest, c.req.raw.signal);
 
     return c.json(toOpenAiChatCompletion(result));
   });

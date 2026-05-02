@@ -4,9 +4,21 @@ export interface Usage {
   totalTokens?: number;
 }
 
+export interface ContentTextPart {
+  type: 'text';
+  text: string;
+}
+
+export interface ContentImagePart {
+  type: 'image_url';
+  image_url: { url: string };
+}
+
+export type ContentPart = ContentTextPart | ContentImagePart;
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
+  content: string | ContentPart[];
   toolCallId?: string;
 }
 
@@ -19,10 +31,13 @@ export interface ToolDefinition {
   type: 'function';
 }
 
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export interface ChatRequest {
   maxTokens?: number;
   messages: ChatMessage[];
   model: string;
+  reasoningEffort?: ReasoningEffort;
   stream: boolean;
   temperature?: number;
   tools?: ToolDefinition[];

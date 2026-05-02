@@ -1,4 +1,4 @@
-import type { ResolvedChatRequest } from '../base.js';
+import type { ContentPart, ResolvedChatRequest } from '../base.js';
 
 const CLAUDE_MODEL_ALIASES: Record<string, string> = {
   'claude-haiku-3-5': 'haiku',
@@ -25,21 +25,36 @@ const CLAUDE_MODEL_ALIASES: Record<string, string> = {
 const toClaudeModelArg = (model: string) =>
   CLAUDE_MODEL_ALIASES[model] ?? model;
 
+const extractText = (content: string | ContentPart[]): string => {
+  if (typeof content === 'string') {
+    return content;
+  }
+  return content
+    .filter(
+      (part): part is Extract<ContentPart, { type: 'text' }> =>
+        part.type === 'text'
+    )
+    .map((part) => part.text)
+    .join('');
+};
+
 const splitMessages = (req: ResolvedChatRequest) => {
   const system = req.messages
     .filter((message) => message.role === 'system')
-    .map((message) => message.content)
+    .map((message) => extractText(message.content))
     .join('\n\n')
     .trim();
 
   const prompt = req.messages
     .filter((message) => message.role !== 'system')
-    .map((message) => `${message.role}: ${message.content}`)
+    .map((message) => `${message.role}: ${extractText(message.content)}`)
     .join('\n')
     .trim();
 
   return {
-    prompt: prompt || req.messages.map((message) => message.content).join('\n'),
+    prompt:
+      prompt ||
+      req.messages.map((message) => extractText(message.content)).join('\n'),
     system,
   };
 };
@@ -52,6 +67,7 @@ export const toClaudeCodeRunArgs = (req: ResolvedChatRequest) => {
     'stream-json',
     '--include-partial-messages',
     '--verbose',
+    '--no-session-persistence',
     '--setting-sources',
     'user',
     '--permission-mode',
@@ -62,6 +78,10 @@ export const toClaudeCodeRunArgs = (req: ResolvedChatRequest) => {
 
   if (system) {
     args.push('--append-system-prompt', system);
+  }
+
+  if (req.reasoningEffort) {
+    args.push('--effort', req.reasoningEffort);
   }
 
   return {

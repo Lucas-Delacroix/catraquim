@@ -136,6 +136,57 @@ describe('runClaudeCode', () => {
     expect(child.stdinChunks.join('')).toBe('user: hello\n');
   });
 
+  it('passes --effort flag when reasoning_effort is set', async () => {
+    const child = new MockClaudeProcess();
+    mockSpawn.mockReturnValue(child);
+
+    const resultPromise = runClaudeCode(
+      config,
+      { ...request, reasoningEffort: 'high' },
+      new AbortController().signal
+    );
+
+    child.stdout.push(
+      `${JSON.stringify({ type: 'init', session_id: 's2' })}\n`
+    );
+    child.stdout.push(
+      `${JSON.stringify({ result: 'Deep thoughts', type: 'result' })}\n`
+    );
+    child.emit('close', 0);
+
+    await resultPromise;
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      'claude',
+      expect.arrayContaining(['--effort', 'high']),
+      expect.anything()
+    );
+  });
+
+  it('omits --effort flag when reasoning_effort is absent', async () => {
+    const child = new MockClaudeProcess();
+    mockSpawn.mockReturnValue(child);
+
+    const resultPromise = runClaudeCode(
+      config,
+      request,
+      new AbortController().signal
+    );
+
+    child.stdout.push(
+      `${JSON.stringify({ type: 'init', session_id: 's3' })}\n`
+    );
+    child.stdout.push(
+      `${JSON.stringify({ result: 'Hello', type: 'result' })}\n`
+    );
+    child.emit('close', 0);
+
+    await resultPromise;
+
+    const spawnArgs = mockSpawn.mock.calls[0]?.[1] as string[];
+    expect(spawnArgs).not.toContain('--effort');
+  });
+
   it('returns provider errors from stderr on non-zero exit', async () => {
     const child = new MockClaudeProcess();
     mockSpawn.mockReturnValue(child);

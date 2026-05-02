@@ -1,3 +1,4 @@
+import type { ChatChunk } from '../adapters/base.js';
 import type { ModelBinding } from '../application/model-registry.js';
 import type { ChatCompletionResult } from '../usecases/complete-chat.js';
 
@@ -33,5 +34,26 @@ export const createNotImplementedStreamPayload = (
       requested_model: requestedModel,
       type: 'not_implemented',
     },
+  };
+};
+
+export const toOpenAiStreamChunk = (
+  chunk: ChatChunk,
+  model: string,
+  id: string
+) => {
+  return {
+    id,
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [
+      {
+        index: 0,
+        delta: chunk.delta ? { content: chunk.delta } : {},
+        finish_reason: chunk.finishReason ?? null,
+      },
+    ],
+    ...(chunk.usage ? { usage: chunk.usage } : {}),
   };
 };

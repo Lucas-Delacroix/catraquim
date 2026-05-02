@@ -183,137 +183,165 @@ function pushFinalText(
   return finalText;
 }
 
+async function startThread(
+  client: CodexAppServerClient,
+  threadParams: unknown,
+  signal: AbortSignal
+): Promise<string> {
+  const raw = await client.request('thread/start', threadParams, {
+    signal,
+    timeoutMs: 30_000,
+  });
+  const parsed = codexRpcThreadStartResultSchema.safeParse(raw);
+
+  if (!parsed.success) {
+    throw AppError.provider(
+      'Invalid Codex thread/start response',
+      502,
+      parsed.error,
+      { code: 'invalid_thread_start_response' }
+    );
+  }
+
+  return parsed.data.thread.id;
+}
+
+class TurnSession {
+  private readonly texts: string[] = [];
+  private turnId: string | undefined;
+  private removeListener: (() => void) | undefined;
+  private settled = false;
+
+  constructor(
+    private readonly client: CodexAppServerClient,
+    private readonly threadId: string,
+    private readonly signal: AbortSignal,
+    private readonly resolve: (result: TurnResult) => void,
+    private readonly reject: (error: Error) => void
+  ) {}
+
+  start(turnBaseParams: unknown): void {
+    if (this.signal.aborted) {
+      this.handleAbort();
+      return;
+    }
+
+    this.removeListener = this.client.onNotification((msg) =>
+      this.handleNotification(msg)
+    );
+    this.signal.addEventListener('abort', this.handleAbort, { once: true });
+
+    this.client
+      .request(
+        'turn/start',
+        {
+          ...(turnBaseParams as Record<string, unknown>),
+          threadId: this.threadId,
+        },
+        { signal: this.signal, timeoutMs: 30_000 }
+      )
+      .then((raw) => this.handleTurnStartResponse(raw))
+      .catch((error: Error) => this.rejectTurn(error));
+  }
+
+  private handleNotification(msg: CodexRpcNotificationMessage): void {
+    const params = toRecord(msg.params);
+    if (!isMatchingThread(params, this.threadId)) return;
+
+    const delta = extractDeltaText(msg);
+    if (delta) this.texts.push(delta);
+
+    if (msg.method !== 'turn/completed') return;
+    if (!isMatchingTurn(params, this.turnId)) return;
+
+    const parsedParams = codexTurnCompletedParamsSchema.safeParse(params);
+    const turn = parsedParams.success ? parsedParams.data.turn : undefined;
+    if (turn && isTerminalFailureStatus(turn.status)) {
+      this.rejectTurn(errorForTurnStatus(turn));
+      return;
+    }
+
+    this.resolveTurn(
+      turn?.items,
+      { params, threadId: this.threadId, turnId: this.turnId },
+      'Codex turn/completed notification had no extractable assistant text'
+    );
+  }
+
+  private handleTurnStartResponse(raw: unknown): void {
+    const turn = normalizeTurnResponse(raw);
+    if (!turn) return;
+
+    this.turnId = turn.id;
+
+    if (isTerminalFailureStatus(turn.status)) {
+      this.rejectTurn(errorForTurnStatus(turn));
+      return;
+    }
+
+    if (turn.status !== 'completed') return;
+
+    this.resolveTurn(
+      turn.items,
+      { threadId: this.threadId, turnId: this.turnId, turn },
+      'Codex turn completed without extractable assistant text'
+    );
+  }
+
+  private handleAbort = (): void => {
+    this.client
+      .notify('turn/interrupt', {
+        threadId: this.threadId,
+        turnId: this.turnId,
+      })
+      .catch(() => {});
+    this.rejectTurn(
+      AppError.transient('Turn aborted', 499, undefined, {
+        code: 'turn_aborted',
+      })
+    );
+  };
+
+  private cleanup(): void {
+    this.removeListener?.();
+    this.signal.removeEventListener('abort', this.handleAbort);
+  }
+
+  private rejectTurn(error: Error): void {
+    if (this.settled) return;
+    this.settled = true;
+    this.cleanup();
+    this.reject(error);
+  }
+
+  private resolveTurn(
+    items: Array<Record<string, unknown>> | undefined,
+    context: Record<string, unknown>,
+    emptyTextWarning: string
+  ): void {
+    if (this.settled) return;
+    this.settled = true;
+
+    const finalText = pushFinalText(this.texts, items);
+    if (!finalText && this.texts.length === 0) {
+      logger.warn(context, emptyTextWarning);
+    }
+
+    this.cleanup();
+    this.resolve({ text: this.texts.join('') });
+  }
+}
+
 export async function runTurn(
   client: CodexAppServerClient,
   threadParams: unknown,
   turnBaseParams: unknown,
   signal: AbortSignal
 ): Promise<TurnResult> {
-  const rawThreadResult = await client.request('thread/start', threadParams, {
-    signal,
-    timeoutMs: 30_000,
-  });
-  const threadResult =
-    codexRpcThreadStartResultSchema.safeParse(rawThreadResult);
-
-  if (!threadResult.success) {
-    throw AppError.provider(
-      'Invalid Codex thread/start response',
-      502,
-      threadResult.error,
-      {
-        code: 'invalid_thread_start_response',
-      }
-    );
-  }
-
-  const threadId = threadResult.data.thread.id;
-  let turnId: string | undefined;
+  const threadId = await startThread(client, threadParams, signal);
 
   return new Promise((resolve, reject) => {
-    const texts: string[] = [];
-
-    const cleanup = () => {
-      removeListener();
-      signal.removeEventListener('abort', handleAbort);
-    };
-
-    const rejectTurn = (error: Error) => {
-      cleanup();
-      reject(error);
-    };
-
-    const resolveTurn = (
-      items: Array<Record<string, unknown>> | undefined,
-      context: Record<string, unknown>,
-      emptyTextWarning: string
-    ) => {
-      const finalText = pushFinalText(texts, items);
-      if (!finalText && texts.length === 0) {
-        logger.warn(context, emptyTextWarning);
-      }
-
-      cleanup();
-      resolve({ text: texts.join('') });
-    };
-
-    const removeListener = client.onNotification((msg) => {
-      const params = toRecord(msg.params);
-
-      if (!isMatchingThread(params, threadId)) {
-        return;
-      }
-
-      const delta = extractDeltaText(msg);
-      if (delta) texts.push(delta);
-
-      if (msg.method !== 'turn/completed') {
-        return;
-      }
-
-      if (!isMatchingTurn(params, turnId)) {
-        return;
-      }
-
-      const parsedParams = codexTurnCompletedParamsSchema.safeParse(params);
-      const turn = parsedParams.success ? parsedParams.data.turn : undefined;
-      if (turn && isTerminalFailureStatus(turn.status)) {
-        rejectTurn(errorForTurnStatus(turn));
-        return;
-      }
-
-      resolveTurn(
-        turn?.items,
-        { params, threadId, turnId },
-        'Codex turn/completed notification had no extractable assistant text'
-      );
-    });
-
-    const handleAbort = () => {
-      client.notify('turn/interrupt', { threadId, turnId }).catch(() => {});
-      rejectTurn(
-        AppError.transient('Turn aborted', 499, undefined, {
-          code: 'turn_aborted',
-        })
-      );
-    };
-
-    if (signal.aborted) {
-      handleAbort();
-      return;
-    }
-
-    signal.addEventListener('abort', handleAbort, { once: true });
-
-    client
-      .request(
-        'turn/start',
-        { ...(turnBaseParams as Record<string, unknown>), threadId },
-        { signal, timeoutMs: 30_000 }
-      )
-      .then((raw) => {
-        const turn = normalizeTurnResponse(raw);
-        if (!turn) return;
-
-        turnId = turn.id;
-
-        if (isTerminalFailureStatus(turn.status)) {
-          rejectTurn(errorForTurnStatus(turn));
-          return;
-        }
-
-        if (turn.status !== 'completed') {
-          return;
-        }
-
-        resolveTurn(
-          turn.items,
-          { threadId, turnId, turn },
-          'Codex turn completed without extractable assistant text'
-        );
-      })
-      .catch((error: Error) => {
-        rejectTurn(error);
-      });
+    const session = new TurnSession(client, threadId, signal, resolve, reject);
+    session.start(turnBaseParams);
   });
 }

@@ -9,17 +9,19 @@ import { defaultCodexProvider, findFirstProviderByType } from './providers.js';
 import { type AppConfig, appConfigSchema } from './schema.js';
 import { readEffectiveConfig, writeConfigFile } from './store.js';
 
+const isQuoted = (value: string, quote: '"' | "'") =>
+  value.startsWith(quote) && value.endsWith(quote);
+
+const stripQuotes = (part: string): string => {
+  if (isQuoted(part, '"') || isQuoted(part, "'")) {
+    return part.slice(1, -1);
+  }
+  return part;
+};
+
 const splitCommand = (command: string): string[] => {
   const parts = command.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
-  return parts.map((part) => {
-    if (
-      (part.startsWith('"') && part.endsWith('"')) ||
-      (part.startsWith("'") && part.endsWith("'"))
-    ) {
-      return part.slice(1, -1);
-    }
-    return part;
-  });
+  return parts.map(stripQuotes);
 };
 
 export interface InitConfigOptions {
@@ -129,6 +131,15 @@ interface PromptedModel {
   };
 }
 
+const AFFIRMATIVE_ANSWERS = new Set(['y', 'yes', 's', 'sim']);
+const NEGATIVE_ANSWERS = new Set(['n', 'no', 'nao', 'não']);
+
+const parseConfirmation = (answer: string): boolean | null => {
+  if (AFFIRMATIVE_ANSWERS.has(answer)) return true;
+  if (NEGATIVE_ANSWERS.has(answer)) return false;
+  return null;
+};
+
 const normalizeToken = (value: string) => {
   const trimmed = value.trim();
   return trimmed === '' ? null : trimmed;
@@ -226,6 +237,36 @@ const buildModelsConfig = (
   return models;
 };
 
+type ModelEntry = [string, AppConfig['models'][string]];
+
+const fallbackEntry = (alias: string): ModelEntry => [
+  alias,
+  defaultConfig.models[alias],
+];
+
+interface ModelDefaults {
+  hasSecondary: boolean;
+  primary: ModelEntry;
+  secondary: ModelEntry;
+}
+
+const resolveDefaultModelEntries = (
+  config: AppConfig,
+  providerId: string
+): ModelDefaults => {
+  const allEntries = Object.entries(config.models);
+  const ownedByProvider = allEntries.filter(
+    ([, model]) => model.adapter === providerId
+  );
+  const candidates = ownedByProvider.length > 0 ? ownedByProvider : allEntries;
+
+  return {
+    hasSecondary: candidates.length > 1,
+    primary: candidates[0] ?? fallbackEntry('codex-max'),
+    secondary: candidates[1] ?? fallbackEntry('codex-mini'),
+  };
+};
+
 const createPromptApi = (
   input: NodeJS.ReadableStream = process.stdin,
   output: NodeJS.WritableStream = process.stdout
@@ -256,19 +297,13 @@ const createPromptApi = (
         .trim()
         .toLowerCase();
 
-      if (answer === '') {
-        return defaultValue;
-      }
+      if (answer === '') return defaultValue;
 
-      if (['y', 'yes', 's', 'sim'].includes(answer)) {
-        return true;
+      const parsed = parseConfirmation(answer);
+      if (parsed === null) {
+        throw new AppError(`Invalid confirmation "${answer}"`, 400);
       }
-
-      if (['n', 'no', 'nao', 'não'].includes(answer)) {
-        return false;
-      }
-
-      throw new AppError(`Invalid confirmation "${answer}"`, 400);
+      return parsed;
     },
     close: () => {
       rl.close();
@@ -293,20 +328,11 @@ export const setupConfig = async ({
   const currentProvider =
     findFirstProviderByType(currentConfig.providers, 'codex') ??
     defaultCodexProvider();
-  const allModelEntries = Object.entries(currentConfig.models);
-  const providerModelEntries = allModelEntries.filter(
-    ([, model]) => model.adapter === currentProvider.id
-  );
-  const modelEntries =
-    providerModelEntries.length > 0 ? providerModelEntries : allModelEntries;
-  const firstModel = modelEntries[0] ?? [
-    'codex-max',
-    defaultConfig.models['codex-max'],
-  ];
-  const secondModel = modelEntries[1] ?? [
-    'codex-mini',
-    defaultConfig.models['codex-mini'],
-  ];
+  const {
+    primary: firstModel,
+    secondary: secondModel,
+    hasSecondary,
+  } = resolveDefaultModelEntries(currentConfig, currentProvider.id);
   const prompts = promptApi ?? createPromptApi(input, output);
   const created = !existsSync(filePath);
 
@@ -344,7 +370,7 @@ export const setupConfig = async ({
     );
     const includeSecondModel = await prompts.confirm(
       'Configure a second model',
-      modelEntries.length > 1
+      hasSecondary
     );
 
     let secondModelInput: PromptedModel | undefined;

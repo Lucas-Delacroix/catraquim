@@ -53,43 +53,47 @@ const mergeUserConfigs = (configs: Partial<AppConfig>[]): AppConfig => {
   );
 };
 
-const applyEnvOverrides = (config: AppConfig): AppConfig => {
-  const claudeCodeProvider = findFirstProviderByType(
-    config.providers,
-    'claude-code'
-  );
-  const codexProvider = findFirstProviderByType(config.providers, 'codex');
-  const providers: AppConfig['providers'] = {};
+const firstEnvValue = (...names: string[]) => {
+  for (const name of names) {
+    const value = readOptionalEnv(name);
+    if (value) return value;
+  }
+  return undefined;
+};
 
-  if (claudeCodeProvider) {
-    providers[claudeCodeProvider.id] = {
-      ...claudeCodeProvider.config,
-      binary:
-        readOptionalEnv('CATRAQUIM_CLAUDE_CODE_BINARY') ??
-        readOptionalEnv('CATRAQUIM_CLAUDE_BINARY') ??
-        claudeCodeProvider.config.binary,
-      homePath: expandHome(claudeCodeProvider.config.homePath),
+const providerBinaryEnvVars: Record<string, string[]> = {
+  'claude-code': ['CATRAQUIM_CLAUDE_CODE_BINARY', 'CATRAQUIM_CLAUDE_BINARY'],
+  codex: ['CATRAQUIM_CODEX_BINARY'],
+};
+
+const buildProviderOverrides = (config: AppConfig): AppConfig['providers'] => {
+  const overrides: AppConfig['providers'] = {};
+
+  for (const [type, envVars] of Object.entries(providerBinaryEnvVars)) {
+    const provider = findFirstProviderByType(
+      config.providers,
+      type as keyof typeof providerBinaryEnvVars
+    );
+    if (!provider) continue;
+
+    overrides[provider.id] = {
+      ...provider.config,
+      binary: firstEnvValue(...envVars) ?? provider.config.binary,
+      homePath: expandHome(provider.config.homePath),
     };
   }
 
-  if (codexProvider) {
-    providers[codexProvider.id] = {
-      ...codexProvider.config,
-      binary:
-        readOptionalEnv('CATRAQUIM_CODEX_BINARY') ??
-        codexProvider.config.binary,
-      homePath: expandHome(codexProvider.config.homePath),
-    };
-  }
+  return overrides;
+};
 
-  return mergeConfig(config, {
-    providers,
+const applyEnvOverrides = (config: AppConfig): AppConfig =>
+  mergeConfig(config, {
+    providers: buildProviderOverrides(config),
     server: {
       port: Number(readOptionalEnv('CATRAQUIM_PORT') ?? config.server.port),
       token: readOptionalEnv('CATRAQUIM_TOKEN') ?? config.server.token,
     },
   });
-};
 
 export const loadConfig = (): AppConfig => {
   const filePaths = listConfigPaths();

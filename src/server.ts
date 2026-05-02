@@ -81,38 +81,44 @@ const closeAdapters = (adapters: Adapter[]) => {
   }
 };
 
-const registerShutdownHandlers = (server: ServerType, adapters: Adapter[]) => {
-  let shuttingDown = false;
-  const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+const SHUTDOWN_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
 
-  const removeHandlers = () => {
-    for (const signal of signals) {
-      const handler = signalHandlers.get(signal);
-      if (handler) {
-        process.removeListener(signal, handler);
-      }
-    }
-  };
-
-  const shutdown = (signal: NodeJS.Signals) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-
-    logger.info({ signal }, 'Shutting down catraquim');
-    closeAdapters(adapters);
-
+const closeServer = (server: ServerType) =>
+  new Promise<void>((resolve) => {
     server.close((error?: Error) => {
       if (error) {
         logger.error({ err: error }, 'HTTP server close failed');
         process.exitCode = 1;
       }
-      removeHandlers();
+      resolve();
     });
+  });
+
+const registerShutdownHandlers = (server: ServerType, adapters: Adapter[]) => {
+  const signalHandlers = new Map<NodeJS.Signals, () => void>();
+  let shuttingDown = false;
+
+  const removeHandlers = () => {
+    for (const [signal, handler] of signalHandlers) {
+      process.removeListener(signal, handler);
+    }
+    signalHandlers.clear();
   };
 
-  const signalHandlers = new Map<NodeJS.Signals, () => void>();
-  for (const signal of signals) {
-    const handler = () => shutdown(signal);
+  const shutdown = async (signal: NodeJS.Signals) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    logger.info({ signal }, 'Shutting down catraquim');
+    closeAdapters(adapters);
+    await closeServer(server);
+    removeHandlers();
+  };
+
+  for (const signal of SHUTDOWN_SIGNALS) {
+    const handler = () => {
+      void shutdown(signal);
+    };
     signalHandlers.set(signal, handler);
     process.once(signal, handler);
   }

@@ -7,6 +7,8 @@ import { logger } from '../../logger.js';
 import { prepareCodexHome } from './auth-bridge.js';
 import {
   type CodexRpcNotificationMessage,
+  type CodexRpcRequestMessage,
+  type CodexRpcResponseMessage,
   isRpcNotification,
   isRpcRequest,
   isRpcResponse,
@@ -248,57 +250,71 @@ export class CodexRpcTransport {
     };
   }
 
-  private handleLine(line: string) {
+  private parseLine(line: string): unknown | undefined {
     const trimmed = line.trim();
-    if (!trimmed) return;
+    if (!trimmed) return undefined;
 
-    let msg: unknown;
     try {
-      msg = JSON.parse(trimmed);
+      return JSON.parse(trimmed);
     } catch {
       logger.warn({ line: trimmed }, 'Failed to parse codex message');
+      return undefined;
+    }
+  }
+
+  private handleResponse(msg: CodexRpcResponseMessage) {
+    if (!this.pendingRequests.has(msg.id)) return;
+
+    if (msg.error) {
+      this.completePendingRequest(
+        msg.id,
+        AppError.provider(
+          `Codex RPC error on request ${msg.id}: ${msg.error.message}`,
+          502,
+          msg.error,
+          {
+            code: 'rpc_error',
+            details: { rpcCode: msg.error.code },
+          }
+        )
+      );
       return;
     }
 
-    if (isRpcResponse(msg)) {
-      const pending = this.pendingRequests.get(msg.id);
-      if (!pending) return;
+    this.completePendingRequest(msg.id, undefined, msg.result);
+  }
 
-      if (msg.error) {
-        this.completePendingRequest(
-          msg.id,
-          AppError.provider(
-            `Codex RPC error on request ${msg.id}: ${msg.error.message}`,
-            502,
-            msg.error,
-            {
-              code: 'rpc_error',
-              details: {
-                rpcCode: msg.error.code,
-              },
-            }
-          )
-        );
-      } else {
-        this.completePendingRequest(msg.id, undefined, msg.result);
+  private handleServerRequest(msg: CodexRpcRequestMessage) {
+    const result = SERVER_REQUEST_DEFAULTS[msg.method] ?? {};
+    this.sendRaw(JSON.stringify({ id: msg.id, result }));
+  }
+
+  private dispatchNotification(msg: CodexRpcNotificationMessage) {
+    for (const handler of [...this.notificationHandlers]) {
+      try {
+        handler(msg);
+      } catch (error) {
+        logger.warn({ err: error }, 'Codex notification handler failed');
       }
+    }
+  }
+
+  private handleLine(line: string) {
+    const msg = this.parseLine(line);
+    if (msg === undefined) return;
+
+    if (isRpcResponse(msg)) {
+      this.handleResponse(msg);
       return;
     }
 
     if (isRpcRequest(msg)) {
-      const result = SERVER_REQUEST_DEFAULTS[msg.method] ?? {};
-      this.sendRaw(JSON.stringify({ id: msg.id, result }));
+      this.handleServerRequest(msg);
       return;
     }
 
     if (isRpcNotification(msg)) {
-      for (const handler of [...this.notificationHandlers]) {
-        try {
-          handler(msg);
-        } catch (error) {
-          logger.warn({ err: error }, 'Codex notification handler failed');
-        }
-      }
+      this.dispatchNotification(msg);
     }
   }
 
@@ -373,6 +389,26 @@ export class CodexRpcTransport {
     });
   }
 
+  private destroyStdio(proc: ChildProcess) {
+    proc.stdin?.end();
+    proc.stdin?.destroy();
+    proc.stdout?.destroy();
+    proc.stderr?.destroy();
+  }
+
+  private signalProcess(proc: ChildProcess, signal: NodeJS.Signals) {
+    const isWindows = process.platform === 'win32';
+    if (!isWindows && proc.pid) {
+      try {
+        process.kill(-proc.pid, signal);
+        return;
+      } catch {
+        // fall through to direct kill
+      }
+    }
+    proc.kill(signal);
+  }
+
   public shutdown(): void {
     const proc = this.proc;
     if (!proc || proc.killed) return;
@@ -381,31 +417,12 @@ export class CodexRpcTransport {
     this.processCleanup?.();
     this.processCleanup = undefined;
 
-    const isWindows = process.platform === 'win32';
-    proc.stdin?.end();
-    proc.stdin?.destroy();
-    proc.stdout?.destroy();
-    proc.stderr?.destroy();
-
-    const killGroup = (signal: NodeJS.Signals) => {
-      if (isWindows || !proc.pid) return false;
-      try {
-        process.kill(-proc.pid, signal);
-        return true;
-      } catch {
-        return false;
-      }
-    };
-
-    if (!killGroup('SIGTERM')) {
-      proc.kill('SIGTERM');
-    }
+    this.destroyStdio(proc);
+    this.signalProcess(proc, 'SIGTERM');
 
     const timer = setTimeout(() => {
       if (proc.killed) return;
-      if (!killGroup('SIGKILL')) {
-        proc.kill('SIGKILL');
-      }
+      this.signalProcess(proc, 'SIGKILL');
     }, 1000);
 
     timer.unref();

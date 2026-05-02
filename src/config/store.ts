@@ -27,6 +27,14 @@ const toCanonicalModelBinding = (canonicalRef: string) => {
   };
 };
 
+const pickCanonicalRef = (
+  value: Record<string, unknown>
+): string | undefined => {
+  if (typeof value.canonicalRef === 'string') return value.canonicalRef;
+  if (typeof value.providerModel === 'string') return value.providerModel;
+  return undefined;
+};
+
 const normalizeModelValue = (value: unknown) => {
   if (typeof value === 'string') {
     return toCanonicalModelBinding(value) ?? value;
@@ -36,16 +44,10 @@ const normalizeModelValue = (value: unknown) => {
     return value;
   }
 
-  const canonicalRef =
-    typeof value.canonicalRef === 'string'
-      ? value.canonicalRef
-      : typeof value.providerModel === 'string'
-        ? value.providerModel
-        : undefined;
+  const canonicalRef = pickCanonicalRef(value);
+  if (!canonicalRef) return value;
 
-  return canonicalRef
-    ? (toCanonicalModelBinding(canonicalRef) ?? value)
-    : value;
+  return toCanonicalModelBinding(canonicalRef) ?? value;
 };
 
 const normalizeModels = (rawModels: unknown) => {
@@ -73,6 +75,10 @@ const looksLikeLegacyCodexProvider = (
   );
 };
 
+const firstString = (...candidates: unknown[]): string | undefined => {
+  return candidates.find((c): c is string => typeof c === 'string');
+};
+
 const normalizeProviderValue = (
   providerValue: Record<string, unknown>
 ): ProviderConfig => {
@@ -80,12 +86,7 @@ const normalizeProviderValue = (
 
   return {
     ...providerRest,
-    homePath:
-      typeof homePath === 'string'
-        ? homePath
-        : typeof codexHomeSource === 'string'
-          ? codexHomeSource
-          : undefined,
+    homePath: firstString(homePath, codexHomeSource),
     type: 'codex',
   } as ProviderConfig;
 };
@@ -168,6 +169,16 @@ export const parseConfigJson = (
   }
 };
 
+const haveMatchingType = (a: unknown, b: unknown): boolean => {
+  return (
+    isRecord(a) &&
+    isRecord(b) &&
+    'type' in a &&
+    'type' in b &&
+    a.type === b.type
+  );
+};
+
 const mergeProviders = (
   base: AppConfig['providers'],
   overrides: Partial<AppConfig>['providers']
@@ -177,13 +188,7 @@ const mergeProviders = (
   for (const [providerId, providerConfig] of Object.entries(overrides ?? {})) {
     const baseProvider = base[providerId];
 
-    if (
-      isRecord(baseProvider) &&
-      isRecord(providerConfig) &&
-      'type' in baseProvider &&
-      'type' in providerConfig &&
-      baseProvider.type === providerConfig.type
-    ) {
+    if (haveMatchingType(baseProvider, providerConfig)) {
       merged[providerId] = {
         ...(baseProvider as ProviderConfig),
         ...(providerConfig as ProviderConfig),

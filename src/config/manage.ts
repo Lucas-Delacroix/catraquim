@@ -6,7 +6,11 @@ import { AppError } from '../errors.js';
 import { defaultConfig } from './defaults.js';
 import { homeConfigPath } from './loader.js';
 import { defaultCodexProvider, findFirstProviderByType } from './providers.js';
-import { type AppConfig, appConfigSchema } from './schema.js';
+import {
+  type AppConfig,
+  type ProviderConfig,
+  appConfigSchema,
+} from './schema.js';
 import { readEffectiveConfig, writeConfigFile } from './store.js';
 
 const isQuoted = (value: string, quote: '"' | "'") =>
@@ -155,6 +159,47 @@ const parsePort = (value: string) => {
   return port;
 };
 
+export const formatSetupExamples = () => `Config examples:
+
+Codex:
+  Provider type: codex
+  Provider id: codex
+  Codex binary: codex
+  Codex home: ~/.codex
+  Primary model alias: codex-max
+  Primary canonical model: codex/gpt-5.4
+  Second model alias: codex-mini
+  Second canonical model: codex/gpt-5.4-mini
+
+Claude Code:
+  Provider type: claude-code
+  Provider id: claude-code
+  Claude Code binary: claude
+  Claude Code home: ~/.claude
+  Primary model alias: claude-opus
+  Primary canonical model: claude-code/claude-opus-4-7
+  Second model alias: claude-sonnet
+  Second canonical model: claude-code/claude-sonnet-4-6
+
+`;
+
+const parseProviderType = (value: string): ProviderConfig['type'] => {
+  const providerType = value.trim();
+
+  if (providerType === 'codex' || providerType === 'claude-code') {
+    return providerType;
+  }
+
+  if (providerType === 'claude') {
+    return 'claude-code';
+  }
+
+  throw new AppError(`Invalid provider type "${value}"`, 400);
+};
+
+const providerPromptName = (providerType: ProviderConfig['type']) =>
+  providerType === 'claude-code' ? 'Claude Code' : 'Codex';
+
 const parseCanonicalModelInput = (value: string, providerId: string) => {
   const trimmed = value.trim();
   if (trimmed === '') {
@@ -239,10 +284,21 @@ const buildModelsConfig = (
 
 type ModelEntry = [string, AppConfig['models'][string]];
 
-const fallbackEntry = (alias: string): ModelEntry => [
-  alias,
-  defaultConfig.models[alias],
-];
+const fallbackEntry = (alias: string): ModelEntry => {
+  const model = defaultConfig.models[alias];
+  if (!model) {
+    throw new AppError(`Missing default model alias "${alias}"`, 500);
+  }
+
+  return [alias, model];
+};
+
+const fallbackModelAliases = (
+  providerType: ProviderConfig['type']
+): [string, string] =>
+  providerType === 'claude-code'
+    ? ['claude-opus', 'claude-sonnet']
+    : ['codex-max', 'codex-mini'];
 
 interface ModelDefaults {
   hasSecondary: boolean;
@@ -251,21 +307,21 @@ interface ModelDefaults {
 }
 
 const resolveDefaultModelEntries = (
-  config: AppConfig,
-  providerId: string
+  providerType: ProviderConfig['type']
 ): ModelDefaults => {
-  const allEntries = Object.entries(config.models);
-  const ownedByProvider = allEntries.filter(
-    ([, model]) => model.adapter === providerId
-  );
-  const candidates = ownedByProvider.length > 0 ? ownedByProvider : allEntries;
+  const fallbackAliases = fallbackModelAliases(providerType);
+  const candidates = fallbackAliases.map(fallbackEntry);
 
   return {
     hasSecondary: candidates.length > 1,
-    primary: candidates[0] ?? fallbackEntry('codex-max'),
-    secondary: candidates[1] ?? fallbackEntry('codex-mini'),
+    primary: candidates[0] ?? fallbackEntry(fallbackAliases[0]),
+    secondary: candidates[1] ?? fallbackEntry(fallbackAliases[1]),
   };
 };
+
+const defaultProviderForType = (providerType: ProviderConfig['type']) =>
+  findFirstProviderByType(defaultConfig.providers, providerType) ??
+  defaultCodexProvider();
 
 const createPromptApi = (
   input: NodeJS.ReadableStream = process.stdin,
@@ -328,15 +384,14 @@ export const setupConfig = async ({
   const currentProvider =
     findFirstProviderByType(currentConfig.providers, 'codex') ??
     defaultCodexProvider();
-  const {
-    primary: firstModel,
-    secondary: secondModel,
-    hasSecondary,
-  } = resolveDefaultModelEntries(currentConfig, currentProvider.id);
   const prompts = promptApi ?? createPromptApi(input, output);
   const created = !existsSync(filePath);
 
   try {
+    if (!promptApi) {
+      output.write(formatSetupExamples());
+    }
+
     const host = await prompts.ask('Host', currentConfig.server.host);
     const port = parsePort(
       await prompts.ask('Port', String(currentConfig.server.port))
@@ -347,15 +402,28 @@ export const setupConfig = async ({
         currentConfig.server.token ?? ''
       )
     );
-    const providerId = await prompts.ask('Provider id', currentProvider.id);
+    const providerType = parseProviderType(
+      await prompts.ask(
+        'Provider type (codex|claude-code)',
+        currentProvider.config.type
+      )
+    );
+    const providerDefaults = defaultProviderForType(providerType);
+    const providerId = await prompts.ask('Provider id', providerDefaults.id);
+    const providerName = providerPromptName(providerType);
     const binary = await prompts.ask(
-      'Codex binary',
-      currentProvider.config.binary
+      `${providerName} binary`,
+      providerDefaults.config.binary
     );
     const homePath = await prompts.ask(
-      'Codex home',
-      currentProvider.config.homePath
+      `${providerName} home`,
+      providerDefaults.config.homePath
     );
+    const {
+      primary: firstModel,
+      secondary: secondModel,
+      hasSecondary,
+    } = resolveDefaultModelEntries(providerType);
     const primaryModel = await promptModel(
       prompts,
       {
@@ -395,7 +463,7 @@ export const setupConfig = async ({
       models,
       providers: {
         [providerId]: {
-          type: 'codex',
+          type: providerType,
           binary,
           homePath,
         },

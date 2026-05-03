@@ -21,7 +21,7 @@ describe('OpenAI stream response helpers', () => {
     expect(
       toOpenAiChatCompletion(
         {
-          canonicalModel: 'codex/codex-max',
+          canonicalModel: 'codex/gpt-5.4',
           content: 'hello',
           finishReason: 'stop',
           providerId: 'codex',
@@ -47,7 +47,7 @@ describe('OpenAI stream response helpers', () => {
       ],
       created: 1776947696,
       id: 'chatcmpl_123',
-      model: 'codex/codex-max',
+      model: 'codex/gpt-5.4',
       object: 'chat.completion',
       usage: {
         completion_tokens: 2,
@@ -73,7 +73,7 @@ describe('OpenAI stream response helpers', () => {
             totalTokens: 5,
           },
         },
-        'codex/codex-max',
+        'codex/gpt-5.4',
         'chatcmpl_123'
       )
     ).toEqual({
@@ -86,7 +86,7 @@ describe('OpenAI stream response helpers', () => {
       ],
       created: 1776947696,
       id: 'chatcmpl_123',
-      model: 'codex/codex-max',
+      model: 'codex/gpt-5.4',
       object: 'chat.completion.chunk',
       usage: {
         completion_tokens: 2,
@@ -101,23 +101,21 @@ describe('OpenAI stream response helpers', () => {
   it('creates an initial stream chunk with the assistant role', () => {
     vi.setSystemTime(new Date('2026-04-23T12:34:56Z'));
 
-    expect(toOpenAiStreamStartChunk('codex/codex-max', 'chatcmpl_123')).toEqual(
-      {
-        choices: [
-          {
-            delta: {
-              role: 'assistant',
-            },
-            finish_reason: null,
-            index: 0,
+    expect(toOpenAiStreamStartChunk('codex/gpt-5.4', 'chatcmpl_123')).toEqual({
+      choices: [
+        {
+          delta: {
+            role: 'assistant',
           },
-        ],
-        created: 1776947696,
-        id: 'chatcmpl_123',
-        model: 'codex/codex-max',
-        object: 'chat.completion.chunk',
-      }
-    );
+          finish_reason: null,
+          index: 0,
+        },
+      ],
+      created: 1776947696,
+      id: 'chatcmpl_123',
+      model: 'codex/gpt-5.4',
+      object: 'chat.completion.chunk',
+    });
 
     vi.useRealTimers();
   });
@@ -125,7 +123,7 @@ describe('OpenAI stream response helpers', () => {
   it('includes provider metadata in not-implemented stream payloads when a binding is known', () => {
     expect(
       createNotImplementedStreamPayload('codex-max', {
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         providerConfig: {
           binary: 'codex',
           homePath: '~/.codex',
@@ -133,11 +131,11 @@ describe('OpenAI stream response helpers', () => {
         },
         providerId: 'codex',
         requestedModel: 'codex-max',
-        upstreamModel: 'codex-max',
+        upstreamModel: 'gpt-5.4',
       })
     ).toEqual({
       error: {
-        canonical_model: 'codex/codex-max',
+        canonical_model: 'codex/gpt-5.4',
         message: 'Streaming is not implemented yet for model "codex-max"',
         provider: 'codex',
         requested_model: 'codex-max',

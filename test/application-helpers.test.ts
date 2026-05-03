@@ -89,8 +89,8 @@ describe('ProviderModelCatalog', () => {
     expect(catalog.has('unknown', 'codex-max')).toBe(false);
     expect(catalog.listForProvider('missing')).toEqual([]);
     expect(catalog.list()).toContainEqual({
-      canonicalRef: 'codex/codex-max',
-      modelId: 'codex-max',
+      canonicalRef: 'codex/gpt-5.4',
+      modelId: 'gpt-5.4',
       providerId: 'codex',
     });
   });

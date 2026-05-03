@@ -12,11 +12,11 @@ export const defaultConfig: AppConfig = {
     },
     'codex-max': {
       adapter: 'codex',
-      upstreamModel: 'codex-max',
+      upstreamModel: 'gpt-5.4',
     },
     'codex-mini': {
       adapter: 'codex',
-      upstreamModel: 'codex-mini',
+      upstreamModel: 'gpt-5.4-mini',
     },
   },
   providers: {

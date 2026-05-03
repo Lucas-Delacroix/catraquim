@@ -155,11 +155,11 @@ Exemplo:
     },
     "codex-max": {
       "adapter": "codex",
-      "upstreamModel": "codex-max"
+      "upstreamModel": "gpt-5.4"
     },
     "codex-mini": {
       "adapter": "codex",
-      "upstreamModel": "codex-mini"
+      "upstreamModel": "gpt-5.4-mini"
     }
   },
   "providers": {
@@ -198,6 +198,12 @@ Variaveis de ambiente suportadas:
 - `CATRAQUIM_CODEX_BINARY`
 - `CATRAQUIM_CLAUDE_CODE_BINARY`
 - `CATRAQUIM_CLAUDE_BINARY`
+- `LOG_LEVEL`
+- `CATRAQUIM_LOG_FILE`
+- `CATRAQUIM_LOG_MAX_BYTES`
+- `CATRAQUIM_LOG_MAX_FILES`
+
+Em `NODE_ENV=production`, o `catraquim` grava logs JSON em arquivo com rotacao por tamanho para evitar crescimento indefinido em disco. O caminho padrao e `${XDG_STATE_HOME:-~/.local/state}/catraquim/catraquim.log`, com limite de 10 MiB por arquivo e 5 arquivos rotacionados. Ajuste `CATRAQUIM_LOG_FILE`, `CATRAQUIM_LOG_MAX_BYTES` e `CATRAQUIM_LOG_MAX_FILES` conforme a retencao desejada. Defina `CATRAQUIM_LOG_MAX_FILES=0` para manter apenas o arquivo atual.
 
 ## Exemplo de uso
 

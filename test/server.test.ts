@@ -19,7 +19,7 @@ describe('OpenAPI docs', () => {
     expect(body.data).toEqual(
       expect.arrayContaining([
         {
-          canonical_ref: 'codex/codex-max',
+          canonical_ref: 'codex/gpt-5.4',
           id: 'codex-max',
           object: 'model',
           owned_by: 'codex',
@@ -33,7 +33,7 @@ describe('OpenAPI docs', () => {
           source: 'provider-catalog',
         },
         {
-          canonical_ref: 'codex/codex-mini',
+          canonical_ref: 'codex/gpt-5.4-mini',
           id: 'codex-mini',
           object: 'model',
           owned_by: 'codex',
@@ -208,7 +208,7 @@ describe('OpenAPI docs', () => {
   it('returns a fresh chat completion id for each non-streaming response', async () => {
     const context = createServerContext(defaultConfig);
     vi.spyOn(context.completeChat, 'execute').mockResolvedValue({
-      canonicalModel: 'codex/codex-max',
+      canonicalModel: 'codex/gpt-5.4',
       content: 'hello',
       finishReason: 'stop',
       providerId: 'codex',
@@ -245,7 +245,7 @@ describe('OpenAPI docs', () => {
     const executeSpy = vi
       .spyOn(context.completeChat, 'execute')
       .mockResolvedValue({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         content: 'hello',
         finishReason: 'stop',
         providerId: 'codex',
@@ -291,7 +291,7 @@ describe('OpenAPI docs', () => {
     const executeSpy = vi
       .spyOn(context.completeChat, 'execute')
       .mockResolvedValue({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         content: 'hello',
         finishReason: 'stop',
         providerId: 'codex',
@@ -374,7 +374,7 @@ describe('OpenAPI docs', () => {
             index: 0,
           },
         ],
-        model: 'codex/codex-max',
+        model: 'codex/gpt-5.4',
         object: 'chat.completion.chunk',
       })
     );
@@ -399,7 +399,7 @@ describe('OpenAPI docs', () => {
     const executeSpy = vi
       .spyOn(context.completeChat, 'execute')
       .mockResolvedValue({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         content: 'hello',
         finishReason: 'stop',
         providerId: 'codex',
@@ -463,7 +463,7 @@ describe('OpenAPI docs', () => {
     const executeSpy = vi
       .spyOn(context.completeChat, 'execute')
       .mockResolvedValue({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         content: 'hello',
         finishReason: 'stop',
         providerId: 'codex',
@@ -526,7 +526,7 @@ describe('OpenAPI docs', () => {
     const executeSpy = vi
       .spyOn(context.completeChat, 'execute')
       .mockResolvedValue({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         content: 'hello',
         finishReason: 'stop',
         providerId: 'codex',
@@ -561,7 +561,7 @@ describe('OpenAPI docs', () => {
     const executeSpy = vi
       .spyOn(context.completeChat, 'execute')
       .mockResolvedValue({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         content: 'hello',
         finishReason: 'stop',
         providerId: 'codex',
@@ -596,7 +596,7 @@ describe('OpenAPI docs', () => {
     const executeSpy = vi
       .spyOn(context.completeChat, 'execute')
       .mockResolvedValue({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         content: 'hello',
         finishReason: 'stop',
         providerId: 'codex',
@@ -633,7 +633,7 @@ describe('OpenAPI docs', () => {
     const executeSpy = vi
       .spyOn(context.completeChat, 'execute')
       .mockResolvedValue({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         content: 'hello',
         finishReason: 'stop',
         providerId: 'codex',
@@ -668,7 +668,7 @@ describe('OpenAPI docs', () => {
     const executeSpy = vi
       .spyOn(context.completeChat, 'execute')
       .mockResolvedValue({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         content: '{"answer":"hello"}',
         finishReason: 'stop',
         providerId: 'codex',
@@ -719,7 +719,7 @@ describe('OpenAPI docs', () => {
     const executeSpy = vi
       .spyOn(context.completeChat, 'execute')
       .mockResolvedValue({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         content: 'hello',
         finishReason: 'stop',
         providerId: 'codex',
@@ -774,7 +774,7 @@ describe('OpenAPI docs', () => {
     const executeSpy = vi
       .spyOn(context.completeChat, 'execute')
       .mockResolvedValue({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         content: 'hello',
         finishReason: 'stop',
         providerId: 'codex',

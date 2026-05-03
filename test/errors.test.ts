@@ -14,7 +14,7 @@ describe('AppError', () => {
     (factory, statusCode, type, transient) => {
       const cause = new Error('cause');
       const error = factory('boom', undefined, cause, {
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         code: 'example_code',
         details: { retry: false },
         providerId: 'codex',
@@ -22,7 +22,7 @@ describe('AppError', () => {
       });
 
       expect(error).toMatchObject({
-        canonicalModel: 'codex/codex-max',
+        canonicalModel: 'codex/gpt-5.4',
         cause,
         code: 'example_code',
         details: { retry: false },
@@ -54,12 +54,12 @@ describe('AppError', () => {
     });
 
     const enriched = AppError.enrich(original, {
-      canonicalModel: 'codex/codex-max',
+      canonicalModel: 'codex/gpt-5.4',
       requestedModel: 'codex-max',
     });
 
     expect(enriched).toMatchObject({
-      canonicalModel: 'codex/codex-max',
+      canonicalModel: 'codex/gpt-5.4',
       code: 'provider_failed',
       message: 'failed',
       providerId: 'codex',
@@ -76,7 +76,7 @@ describe('toErrorResponse', () => {
     expect(
       toErrorResponse(
         AppError.compatibility('unknown model', 404, undefined, {
-          canonicalModel: 'codex/codex-max',
+          canonicalModel: 'codex/gpt-5.4',
           code: 'unknown_model',
           details: { configured: false },
           providerId: 'codex',
@@ -85,7 +85,7 @@ describe('toErrorResponse', () => {
       )
     ).toEqual({
       error: {
-        canonical_model: 'codex/codex-max',
+        canonical_model: 'codex/gpt-5.4',
         code: 'unknown_model',
         details: { configured: false },
         message: 'unknown model',

@@ -8,6 +8,7 @@ const errorResponseDescriptions = {
   400: 'Invalid request payload.',
   401: 'Unauthorized.',
   404: 'Not found.',
+  413: 'Payload too large.',
   500: 'Internal server error.',
   501: 'Feature not implemented.',
   502: 'Provider request failed.',

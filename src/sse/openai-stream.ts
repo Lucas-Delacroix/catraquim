@@ -1,10 +1,27 @@
+import { randomUUID } from 'node:crypto';
+
 import type { ChatChunk } from '../adapters/base.js';
 import type { ModelBinding } from '../application/model-registry.js';
 import type { ChatCompletionResult } from '../usecases/complete-chat.js';
 
-export const toOpenAiChatCompletion = (completion: ChatCompletionResult) => {
+const toOpenAiUsage = (usage: ChatCompletionResult['usage']) => {
+  if (!usage) return undefined;
+
   return {
-    id: 'chatcmpl_stub',
+    completion_tokens: usage.completionTokens,
+    prompt_tokens: usage.promptTokens,
+    total_tokens: usage.totalTokens,
+  };
+};
+
+export const generateChatCompletionId = () => `chatcmpl_${randomUUID()}`;
+
+export const toOpenAiChatCompletion = (
+  completion: ChatCompletionResult,
+  id: string
+) => {
+  return {
+    id,
     object: 'chat.completion',
     created: Math.floor(Date.now() / 1000),
     model: completion.canonicalModel,
@@ -18,7 +35,7 @@ export const toOpenAiChatCompletion = (completion: ChatCompletionResult) => {
         },
       },
     ],
-    usage: completion.usage,
+    usage: toOpenAiUsage(completion.usage),
   };
 };
 
@@ -34,6 +51,22 @@ export const createNotImplementedStreamPayload = (
       requested_model: requestedModel,
       type: 'not_implemented',
     },
+  };
+};
+
+export const toOpenAiStreamStartChunk = (model: string, id: string) => {
+  return {
+    id,
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [
+      {
+        index: 0,
+        delta: { role: 'assistant' },
+        finish_reason: null,
+      },
+    ],
   };
 };
 
@@ -54,6 +87,6 @@ export const toOpenAiStreamChunk = (
         finish_reason: chunk.finishReason ?? null,
       },
     ],
-    ...(chunk.usage ? { usage: chunk.usage } : {}),
+    ...(chunk.usage ? { usage: toOpenAiUsage(chunk.usage) } : {}),
   };
 };

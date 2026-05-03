@@ -2,11 +2,49 @@ import { z } from '@hono/zod-openapi';
 
 const positiveInt = z.number().int().positive();
 const nonEmptyString = z.string().min(1);
+const stopSchema = z
+  .union([nonEmptyString, z.array(nonEmptyString).min(1).max(4), z.null()])
+  .optional();
+
+const responseFormatJsonSchema = z.object({
+  description: z.string().optional(),
+  name: nonEmptyString,
+  schema: z.record(z.string(), z.unknown()).optional(),
+  strict: z.boolean().optional(),
+});
+
+const responseFormatSchema = z.union([
+  z.object({ type: z.literal('text') }),
+  z.object({ type: z.literal('json_object') }),
+  z.object({
+    json_schema: responseFormatJsonSchema,
+    type: z.literal('json_schema'),
+  }),
+]);
 
 const toolFunctionSchema = z.object({
   description: z.string().optional(),
   name: nonEmptyString,
   parameters: z.record(z.string(), z.unknown()).optional(),
+});
+
+const toolChoiceSchema = z.union([
+  z.enum(['auto', 'none', 'required']),
+  z.object({
+    function: z.object({ name: nonEmptyString }),
+    type: z.literal('function'),
+  }),
+]);
+
+const toolCallFunctionSchema = z.object({
+  arguments: z.string().optional(),
+  name: nonEmptyString,
+});
+
+const toolCallSchema = z.object({
+  function: toolCallFunctionSchema,
+  id: nonEmptyString,
+  type: z.literal('function'),
 });
 
 const assistantMessageSchema = z.object({
@@ -65,32 +103,61 @@ const contentPartSchema = z.discriminatedUnion('type', [
 
 export const chatMessageSchema = z
   .object({
-    content: z.union([z.string(), z.array(contentPartSchema)]),
-    role: z.enum(['system', 'user', 'assistant', 'tool']),
-    toolCallId: z.string().optional(),
+    content: z
+      .union([z.string(), z.array(contentPartSchema), z.null()])
+      .optional(),
+    role: z.enum(['system', 'developer', 'user', 'assistant', 'tool']),
+    tool_calls: z.array(toolCallSchema).optional(),
+    tool_call_id: z.string().optional(),
+  })
+  .superRefine((message, ctx) => {
+    if (
+      message.content === undefined &&
+      !(
+        message.role === 'assistant' &&
+        message.tool_calls &&
+        message.tool_calls.length > 0
+      )
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          'content is required unless an assistant message includes tool_calls',
+        path: ['content'],
+      });
+    }
   })
   .openapi('ChatMessage');
 export type ChatMessageInput = z.infer<typeof chatMessageSchema>;
 
 export const chatCompletionRequestSchema = z
   .object({
+    frequency_penalty: z.number().min(-2).max(2).optional(),
+    max_completion_tokens: positiveInt.optional(),
     max_tokens: positiveInt.optional(),
     messages: z.array(chatMessageSchema).min(1),
     model: nonEmptyString,
+    n: positiveInt.max(1).optional(),
+    presence_penalty: z.number().min(-2).max(2).optional(),
     reasoning_effort: z
       .enum(['low', 'medium', 'high', 'xhigh', 'max'])
       .optional(),
+    response_format: responseFormatSchema.optional(),
     stream: z.boolean().default(false),
+    stop: stopSchema,
     temperature: z.number().min(0).max(2).optional(),
+    tool_choice: toolChoiceSchema.optional(),
+    top_p: z.number().min(0).max(1).optional(),
     tools: z.array(toolDefinitionSchema).optional(),
+    user: z.string().optional(),
   })
   .openapi('ChatCompletionRequest');
 
 export const usageSchema = z
   .object({
-    completionTokens: z.number().int().nonnegative().optional(),
-    promptTokens: z.number().int().nonnegative().optional(),
-    totalTokens: z.number().int().nonnegative().optional(),
+    completion_tokens: z.number().int().nonnegative().optional(),
+    prompt_tokens: z.number().int().nonnegative().optional(),
+    total_tokens: z.number().int().nonnegative().optional(),
   })
   .openapi('Usage');
 

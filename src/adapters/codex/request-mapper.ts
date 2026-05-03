@@ -1,4 +1,5 @@
 import type { ChatRequest } from '../base.js';
+import { chatContentToText } from '../content.js';
 
 export interface ThreadStartParams {
   approvalPolicy: 'never';
@@ -53,7 +54,7 @@ export function toTurnBaseParams(
   runtime: CodexRequestRuntime = defaultRuntime()
 ): TurnBaseParams {
   const text = req.messages
-    .map((message) => `${message.role}: ${message.content}`)
+    .map((message) => `${message.role}: ${chatContentToText(message.content)}`)
     .join('\n');
 
   return {

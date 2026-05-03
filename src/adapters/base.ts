@@ -31,16 +31,42 @@ export interface ToolDefinition {
   type: 'function';
 }
 
+export type ToolChoice =
+  | 'auto'
+  | 'none'
+  | 'required'
+  | { function: { name: string }; type: 'function' };
+
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+export type ResponseFormat =
+  | { type: 'text' }
+  | { type: 'json_object' }
+  | {
+      json_schema: {
+        description?: string;
+        name: string;
+        schema?: Record<string, unknown>;
+        strict?: boolean;
+      };
+      type: 'json_schema';
+    };
+
 export interface ChatRequest {
+  frequencyPenalty?: number;
   maxTokens?: number;
   messages: ChatMessage[];
   model: string;
+  presencePenalty?: number;
   reasoningEffort?: ReasoningEffort;
+  responseFormat?: ResponseFormat;
   stream: boolean;
+  stop?: string[];
   temperature?: number;
+  toolChoice?: ToolChoice;
+  topP?: number;
   tools?: ToolDefinition[];
+  user?: string;
 }
 
 export interface ResolvedChatRequest extends ChatRequest {

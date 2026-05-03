@@ -66,6 +66,47 @@ describe('CompleteChatUseCase', () => {
     expect(result.requestedModel).toBe('test-model');
   });
 
+  it('applies OpenAI stop sequences across provider chunk boundaries', async () => {
+    class StoppingAdapter extends FakeAdapter {
+      public override async *chat(): AsyncIterable<ChatChunk> {
+        yield { delta: 'hello <' };
+        yield { delta: 'stop> ignored', finishReason: 'stop' };
+      }
+    }
+
+    const registry = new ModelRegistry(
+      {
+        ...defaultConfig.models,
+        'test-model': {
+          adapter: 'fake',
+          upstreamModel: 'fake-upstream',
+        },
+      },
+      {
+        ...defaultConfig.providers,
+        fake: {
+          type: 'codex',
+          binary: 'fake',
+          homePath: '~/.fake',
+        },
+      }
+    );
+    const useCase = new CompleteChatUseCase(registry, [new StoppingAdapter()]);
+
+    const result = await useCase.execute(
+      {
+        messages: [{ content: 'hi', role: 'user' }],
+        model: 'test-model',
+        stop: ['<stop>'],
+        stream: false,
+      },
+      new AbortController().signal
+    );
+
+    expect(result.content).toBe('hello ');
+    expect(result.finishReason).toBe('stop');
+  });
+
   it('resolves direct provider/model refs without a configured alias', async () => {
     const seen: ResolvedChatRequest[] = [];
 

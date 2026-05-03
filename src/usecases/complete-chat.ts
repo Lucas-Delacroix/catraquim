@@ -23,6 +23,38 @@ interface ExecutionContext {
   request: ResolvedChatRequest;
 }
 
+const findFirstStop = (content: string, stopSequences: string[]) => {
+  let firstIndex = -1;
+
+  for (const stop of stopSequences) {
+    const index = content.indexOf(stop);
+    if (index !== -1 && (firstIndex === -1 || index < firstIndex)) {
+      firstIndex = index;
+    }
+  }
+
+  return firstIndex;
+};
+
+const longestStopPrefixSuffixLength = (
+  content: string,
+  stopSequences: string[]
+) => {
+  let longest = 0;
+
+  for (const stop of stopSequences) {
+    const maxLength = Math.min(stop.length - 1, content.length);
+    for (let length = maxLength; length > longest; length--) {
+      if (content.endsWith(stop.slice(0, length))) {
+        longest = length;
+        break;
+      }
+    }
+  }
+
+  return longest;
+};
+
 export class CompleteChatUseCase {
   private readonly providersById: ReadonlyMap<string, Adapter>;
 
@@ -98,7 +130,62 @@ export class CompleteChatUseCase {
     signal: AbortSignal
   ): AsyncIterable<ChatChunk> {
     try {
-      yield* context.provider.chat(context.request, signal);
+      if (!context.request.stop?.length) {
+        yield* context.provider.chat(context.request, signal);
+        return;
+      }
+
+      let buffer = '';
+      let pendingFinishReason: string | undefined;
+      let pendingUsage: Usage | undefined;
+
+      for await (const chunk of context.provider.chat(
+        context.request,
+        signal
+      )) {
+        buffer += chunk.delta;
+        pendingFinishReason = chunk.finishReason ?? pendingFinishReason;
+        pendingUsage = chunk.usage ?? pendingUsage;
+
+        const stopIndex = findFirstStop(buffer, context.request.stop);
+        if (stopIndex !== -1) {
+          yield {
+            delta: buffer.slice(0, stopIndex),
+            finishReason: 'stop',
+            usage: pendingUsage,
+          };
+          return;
+        }
+
+        const retainedLength = longestStopPrefixSuffixLength(
+          buffer,
+          context.request.stop
+        );
+        const flushLength = buffer.length - retainedLength;
+
+        if (flushLength > 0) {
+          const canFinish = retainedLength === 0;
+          yield {
+            delta: buffer.slice(0, flushLength),
+            ...(canFinish ? { finishReason: pendingFinishReason } : {}),
+            ...(canFinish ? { usage: pendingUsage } : {}),
+          };
+          buffer = buffer.slice(flushLength);
+
+          if (canFinish) {
+            pendingFinishReason = undefined;
+            pendingUsage = undefined;
+          }
+        }
+      }
+
+      if (buffer || pendingFinishReason || pendingUsage) {
+        yield {
+          delta: buffer,
+          finishReason: pendingFinishReason,
+          usage: pendingUsage,
+        };
+      }
     } catch (error) {
       throw this.toExecutionError(error, context.request);
     }

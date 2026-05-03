@@ -170,4 +170,67 @@ describe('config loader', () => {
     expect(config.server.port).toBe(6161);
     expect(config.server.token).toBe('from-env');
   });
+
+  it('rejects ports outside the TCP range', () => {
+    const dir = createTempDir();
+    const explicitPath = join(dir, 'config.json');
+
+    writeFileSync(
+      explicitPath,
+      JSON.stringify({
+        server: {
+          port: 70_000,
+        },
+      }),
+      'utf8'
+    );
+
+    process.env.CATRAQUIM_CONFIG = explicitPath;
+
+    expect(() => loadConfig()).toThrow(/Too big/);
+  });
+
+  it('rejects model aliases that reference unknown providers', () => {
+    const dir = createTempDir();
+    const explicitPath = join(dir, 'config.json');
+
+    writeFileSync(
+      explicitPath,
+      JSON.stringify({
+        models: {
+          broken: {
+            adapter: 'missing-provider',
+            upstreamModel: 'gpt-5',
+          },
+        },
+      }),
+      'utf8'
+    );
+
+    process.env.CATRAQUIM_CONFIG = explicitPath;
+
+    expect(() => loadConfig()).toThrow(/broken.*missing-provider/);
+  });
+
+  it('rejects non-loopback hosts without a bearer token', () => {
+    const dir = createTempDir();
+    const explicitPath = join(dir, 'config.json');
+
+    writeFileSync(
+      explicitPath,
+      JSON.stringify({
+        server: {
+          host: '0.0.0.0',
+          token: null,
+        },
+      }),
+      'utf8'
+    );
+
+    process.env.CATRAQUIM_CONFIG = explicitPath;
+
+    expect(() => loadConfig()).toThrow(
+      /server\.token is required when server\.host is not loopback/
+    );
+  });
 });

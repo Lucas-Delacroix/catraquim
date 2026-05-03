@@ -84,4 +84,26 @@ describe('toClaudeCodeRunArgs', () => {
     expect(result.prompt).toBe('user: hello');
     expect(result.args).not.toContain('--append-system-prompt');
   });
+
+  it('preserves image URL content parts as readable prompt text', () => {
+    const result = toClaudeCodeRunArgs({
+      ...baseRequest,
+      messages: [
+        {
+          content: [
+            { text: 'Review this:', type: 'text' },
+            {
+              image_url: { url: 'https://example.com/screenshot.png' },
+              type: 'image_url',
+            },
+          ],
+          role: 'user',
+        },
+      ],
+    });
+
+    expect(result.prompt).toBe(
+      'user: Review this:\n[image_url: https://example.com/screenshot.png]'
+    );
+  });
 });

@@ -29,6 +29,7 @@ O `catraquim` funciona como uma camada HTTP local sobre CLIs de agentes, expondo
 - Aliases de modelos configuráveis, desacoplando o nome exposto do nome real no provider.
 - Documentação em `/docs` e especificação OpenAPI em `/openapi.json`.
 - Middleware opcional com bearer token.
+- Cabeçalhos HTTP defensivos em todas as respostas.
 - CLI para inicializar, validar, editar e inspecionar a configuração.
 - Base em TypeScript, Hono, Zod e Vitest.
 
@@ -180,8 +181,15 @@ Notas:
 
 - `codex-max`, `codex-mini`, `claude-opus` e `claude-sonnet` sao aliases do gateway. Ajuste `upstreamModel` se o seu ambiente usar outros nomes.
 - O provider `claude-code` segue o mesmo padrao do OpenClaw: chama `claude -p --output-format stream-json` e limpa variaveis Anthropic/Claude herdadas para usar a autenticacao local do Claude Code.
+- Se `server.host` nao for loopback (`localhost`, `127.0.0.1` ou `::1`), `server.token` e obrigatorio.
 - Se `server.token` for definido, todas as rotas passam a exigir `Authorization: Bearer <token>`.
+- CORS para clientes de navegador so e habilitado quando `server.token` esta definido; preflight `OPTIONS` e respondido antes da autenticacao bearer.
+- Payloads HTTP acima de 10 MiB sao rejeitados com `413 payload_too_large`.
+- Mensagens OpenAI com `role: "developer"` sao aceitas e tratadas como instrucoes de sistema internas.
 - Requisicoes com `"stream": true` retornam a resposta no formato SSE (`text/event-stream`), compativel com clientes OpenAI.
+- O parametro OpenAI `stop` e aceito como string, array de ate 4 strings ou `null`; quando informado, a resposta e cortada antes da primeira sequencia encontrada.
+- Os parametros OpenAI `temperature`, `top_p`, `presence_penalty`, `frequency_penalty`, `response_format`, `tool_choice` e `user` sao aceitos no contrato HTTP; o efeito pratico depende do provider local configurado.
+- O endpoint de chat completions suporta apenas uma escolha por requisicao; envie `n: 1` ou omita `n`.
 
 Variaveis de ambiente suportadas:
 

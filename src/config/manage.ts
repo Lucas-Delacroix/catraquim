@@ -148,7 +148,7 @@ const normalizeToken = (value: string) => {
 const parsePort = (value: string) => {
   const port = Number(value);
 
-  if (!Number.isInteger(port) || port <= 0) {
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new AppError(`Invalid port "${value}"`, 400);
   }
 

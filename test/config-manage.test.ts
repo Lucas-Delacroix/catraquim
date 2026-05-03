@@ -118,7 +118,7 @@ describe('config management', () => {
           .fn()
           .mockResolvedValueOnce('0.0.0.0')
           .mockResolvedValueOnce('5151')
-          .mockResolvedValueOnce('')
+          .mockResolvedValueOnce('test-token')
           .mockResolvedValueOnce('codex')
           .mockResolvedValueOnce('codex')
           .mockResolvedValueOnce('~/.codex')
@@ -154,7 +154,7 @@ describe('config management', () => {
       server: {
         host: '0.0.0.0',
         port: 5151,
-        token: null,
+        token: 'test-token',
       },
     });
   });
@@ -188,6 +188,58 @@ describe('config management', () => {
       created: false,
       filePath,
     });
+    expect(() => readFileSync(filePath, 'utf8')).toThrow();
+  });
+
+  it('rejects interactive setup ports outside the TCP range', async () => {
+    const filePath = createTempPath();
+    const close = vi.fn();
+
+    await expect(
+      setupConfig({
+        filePath,
+        promptApi: {
+          ask: vi
+            .fn()
+            .mockResolvedValueOnce('127.0.0.1')
+            .mockResolvedValueOnce('70000'),
+          close,
+          confirm: vi.fn(),
+        },
+      })
+    ).rejects.toThrow(/Invalid port "70000"/);
+
+    expect(close).toHaveBeenCalledOnce();
+    expect(() => readFileSync(filePath, 'utf8')).toThrow();
+  });
+
+  it('rejects interactive setup for non-loopback hosts without a token', async () => {
+    const filePath = createTempPath();
+    const close = vi.fn();
+
+    await expect(
+      setupConfig({
+        filePath,
+        promptApi: {
+          ask: vi
+            .fn()
+            .mockResolvedValueOnce('0.0.0.0')
+            .mockResolvedValueOnce('5151')
+            .mockResolvedValueOnce('')
+            .mockResolvedValueOnce('codex')
+            .mockResolvedValueOnce('codex')
+            .mockResolvedValueOnce('~/.codex')
+            .mockResolvedValueOnce('gpt-5')
+            .mockResolvedValueOnce('codex/codex-max'),
+          close,
+          confirm: vi.fn().mockResolvedValueOnce(false),
+        },
+      })
+    ).rejects.toThrow(
+      /server\.token is required when server\.host is not loopback/
+    );
+
+    expect(close).toHaveBeenCalledOnce();
     expect(() => readFileSync(filePath, 'utf8')).toThrow();
   });
 });

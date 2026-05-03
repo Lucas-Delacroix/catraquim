@@ -1,7 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { serve } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
 import { swaggerUI } from '@hono/swagger-ui';
 import { OpenAPIHono } from '@hono/zod-openapi';
+import type { Context, ValidationTargets } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { HTTPException } from 'hono/http-exception';
+import type { ZodError, ZodIssue } from 'zod';
 
 import packageJson from '../package.json';
 import type { Adapter } from './adapters/base.js';
@@ -13,6 +18,8 @@ import type { AppConfig } from './config/schema.js';
 import { AppError, toErrorResponse } from './errors.js';
 import { logger } from './logger.js';
 import { bearerAuth } from './middleware/auth.js';
+import { tokenProtectedCors } from './middleware/cors.js';
+import { securityHeaders } from './middleware/security.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerModelsRoutes } from './routes/models.js';
@@ -31,6 +38,7 @@ export interface ServerContext {
 
 interface RequestLogContext {
   req: {
+    header(name: string): string | undefined;
     method: string;
     path: string;
   };
@@ -39,10 +47,43 @@ interface RequestLogContext {
   };
 }
 
-const buildRequestLog = (c: RequestLogContext, startedAt: number) => ({
+interface RequestIdContext {
+  get(key: 'requestId'): string | undefined;
+  set(key: 'requestId', value: string): void;
+}
+
+type ValidationHookResult =
+  | {
+      data: unknown;
+      success: true;
+      target: keyof ValidationTargets;
+    }
+  | {
+      error: ZodError;
+      success: false;
+      target: keyof ValidationTargets;
+    };
+
+const REQUEST_ID_HEADER = 'x-request-id';
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+const MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
+
+const resolveRequestId = (header: string | undefined) => {
+  if (!header) return randomUUID();
+
+  const requestId = header.trim();
+  return REQUEST_ID_PATTERN.test(requestId) ? requestId : randomUUID();
+};
+
+const buildRequestLog = (
+  c: RequestLogContext,
+  startedAt: number,
+  requestId: string
+) => ({
   durationMs: Date.now() - startedAt,
   method: c.req.method,
   path: c.req.path,
+  requestId,
   status: c.res.status,
 });
 
@@ -53,13 +94,44 @@ const buildStartupModels = (config: AppConfig) => {
   }));
 };
 
-const logAppError = (error: AppError) => {
+const formatValidationPath = (
+  target: keyof ValidationTargets,
+  path: ZodIssue['path']
+) => {
+  const bodyPath = path.map(String).join('.');
+  return bodyPath ? `${target}.${bodyPath}` : target;
+};
+
+const formatValidationIssues = (
+  error: ZodError,
+  target: keyof ValidationTargets
+) =>
+  error.issues.map((issue) => ({
+    code: issue.code,
+    message: issue.message,
+    path: formatValidationPath(target, issue.path),
+  }));
+
+const validationErrorHook = (result: ValidationHookResult, _c: Context) => {
+  if (result.success) return;
+
+  throw AppError.compatibility('Invalid request payload', 400, result.error, {
+    code: 'invalid_request',
+    details: {
+      issues: formatValidationIssues(result.error, result.target),
+      target: result.target,
+    },
+  });
+};
+
+const logAppError = (error: AppError, requestId: string | undefined) => {
   logger.warn(
     {
       canonicalModel: error.canonicalModel,
       code: error.code,
       err: error,
       provider: error.providerId,
+      requestId,
       requestedModel: error.requestedModel,
       transient: error.transient,
       type: error.type,
@@ -67,6 +139,32 @@ const logAppError = (error: AppError) => {
     'Request failed with application error'
   );
 };
+
+const mapFrameworkError = (error: unknown) => {
+  if (error instanceof HTTPException && error.status === 400) {
+    return AppError.compatibility(
+      error.message || 'Invalid request payload',
+      400,
+      error,
+      { code: 'invalid_request' }
+    );
+  }
+
+  return error;
+};
+
+const requestBodyLimit = () =>
+  bodyLimit({
+    maxSize: MAX_REQUEST_BODY_BYTES,
+    onError: () => {
+      throw AppError.compatibility('Payload too large', 413, undefined, {
+        code: 'payload_too_large',
+        details: {
+          max_bytes: MAX_REQUEST_BODY_BYTES,
+        },
+      });
+    },
+  });
 
 const closeAdapters = (adapters: Adapter[]) => {
   for (const adapter of adapters) {
@@ -145,11 +243,15 @@ const createUseCases = (config: AppConfig, adapters: Adapter[]) => {
 const registerRequestLogging = (app: OpenAPIHono) => {
   app.use('*', async (c, next) => {
     const startedAt = Date.now();
+    const requestId = resolveRequestId(c.req.header(REQUEST_ID_HEADER));
+
+    c.header(REQUEST_ID_HEADER, requestId);
+    (c as RequestIdContext).set('requestId', requestId);
 
     try {
       await next();
     } finally {
-      logger.info(buildRequestLog(c, startedAt), 'HTTP request');
+      logger.info(buildRequestLog(c, startedAt, requestId), 'HTTP request');
     }
   });
 };
@@ -179,13 +281,31 @@ const registerApiDocs = (app: OpenAPIHono) => {
 
 const registerErrorHandler = (app: OpenAPIHono) => {
   app.onError((error, c) => {
-    if (error instanceof AppError) {
-      logAppError(error);
+    const requestId = (c as RequestIdContext).get('requestId');
+    const mappedError = mapFrameworkError(error);
+
+    if (mappedError instanceof AppError) {
+      logAppError(mappedError, requestId);
     } else {
-      logger.error({ err: error }, 'Request failed with unexpected error');
+      logger.error(
+        { err: mappedError, requestId },
+        'Request failed with unexpected error'
+      );
     }
 
-    const mapped = toErrorResponse(error);
+    const mapped = toErrorResponse(mappedError);
+    return c.json({ error: mapped.error }, mapped.statusCode);
+  });
+};
+
+const registerNotFoundHandler = (app: OpenAPIHono) => {
+  app.notFound((c) => {
+    const mapped = toErrorResponse(
+      AppError.compatibility('Route not found', 404, undefined, {
+        code: 'route_not_found',
+      })
+    );
+
     return c.json({ error: mapped.error }, mapped.statusCode);
   });
 };
@@ -202,14 +322,18 @@ export const createServerContext = (config = loadConfig()): ServerContext => {
 };
 
 export const createApp = (context = createServerContext()) => {
-  const app = new OpenAPIHono();
+  const app = new OpenAPIHono({ defaultHook: validationErrorHook });
 
   registerRequestLogging(app);
+  app.use('*', securityHeaders());
+  app.use('*', tokenProtectedCors(context.config.server.token));
+  app.use('*', requestBodyLimit());
   app.use('*', bearerAuth(context.config.server.token));
   registerAdminRoutes(app, context.config, context.getProviderStatuses);
   registerModelsRoutes(app, context.listModels);
   registerChatRoutes(app, context.completeChat);
   registerApiDocs(app);
+  registerNotFoundHandler(app);
   registerErrorHandler(app);
 
   return app;

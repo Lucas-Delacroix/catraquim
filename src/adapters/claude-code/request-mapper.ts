@@ -1,4 +1,5 @@
-import type { ContentPart, ResolvedChatRequest } from '../base.js';
+import type { ResolvedChatRequest } from '../base.js';
+import { chatContentToText } from '../content.js';
 
 const CLAUDE_MODEL_ALIASES: Record<string, string> = {
   'claude-haiku-3-5': 'haiku',
@@ -25,36 +26,25 @@ const CLAUDE_MODEL_ALIASES: Record<string, string> = {
 const toClaudeModelArg = (model: string) =>
   CLAUDE_MODEL_ALIASES[model] ?? model;
 
-const extractText = (content: string | ContentPart[]): string => {
-  if (typeof content === 'string') {
-    return content;
-  }
-  return content
-    .filter(
-      (part): part is Extract<ContentPart, { type: 'text' }> =>
-        part.type === 'text'
-    )
-    .map((part) => part.text)
-    .join('');
-};
-
 const splitMessages = (req: ResolvedChatRequest) => {
   const system = req.messages
     .filter((message) => message.role === 'system')
-    .map((message) => extractText(message.content))
+    .map((message) => chatContentToText(message.content))
     .join('\n\n')
     .trim();
 
   const prompt = req.messages
     .filter((message) => message.role !== 'system')
-    .map((message) => `${message.role}: ${extractText(message.content)}`)
+    .map((message) => `${message.role}: ${chatContentToText(message.content)}`)
     .join('\n')
     .trim();
 
   return {
     prompt:
       prompt ||
-      req.messages.map((message) => extractText(message.content)).join('\n'),
+      req.messages
+        .map((message) => chatContentToText(message.content))
+        .join('\n'),
     system,
   };
 };

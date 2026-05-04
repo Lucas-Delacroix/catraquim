@@ -275,9 +275,10 @@ const buildModelsConfig = (
   );
 };
 
+type DefaultModelAlias = keyof typeof defaultConfig.models;
 type ModelEntry = [string, AppConfig['models'][string]];
 
-const fallbackEntry = (alias: string): ModelEntry => {
+const fallbackEntry = (alias: DefaultModelAlias): ModelEntry => {
   const model = defaultConfig.models[alias];
   if (!model) {
     throw new AppError(`Missing default model alias "${alias}"`, 500);
@@ -288,7 +289,7 @@ const fallbackEntry = (alias: string): ModelEntry => {
 
 const fallbackModelAliases = (
   providerType: ProviderConfig['type']
-): [string, string] =>
+): [DefaultModelAlias, DefaultModelAlias] =>
   providerType === 'claude-code'
     ? ['claude-opus', 'claude-sonnet']
     : ['codex-max', 'codex-mini'];
@@ -304,11 +305,21 @@ const defaultProviderForType = (providerType: ProviderConfig['type']) => {
   return { config: defaultConfig.providers[providerType], id: providerType };
 };
 
+interface TtyCapableStream {
+  isTTY?: boolean;
+}
+
+const isInteractiveStream = (
+  stream: NodeJS.ReadableStream | NodeJS.WritableStream
+) => {
+  return (stream as TtyCapableStream).isTTY === true;
+};
+
 const createPromptApi = (
   input: NodeJS.ReadableStream = process.stdin,
   output: NodeJS.WritableStream = process.stdout
 ): PromptApi => {
-  if (!input.isTTY || !output.isTTY) {
+  if (!isInteractiveStream(input) || !isInteractiveStream(output)) {
     throw new AppError('config:setup requires an interactive terminal', 400);
   }
 

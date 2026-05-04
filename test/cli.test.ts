@@ -30,6 +30,9 @@ vi.mock('../src/logger.js', () => ({
 
 import { run } from '../src/cli.js';
 
+const ok = (msg: string) => `✓ ${msg}\n`;
+const info = (msg: string) => `→ ${msg}\n`;
+
 describe('CLI', () => {
   const stdoutSpy = vi
     .spyOn(process.stdout, 'write')
@@ -45,7 +48,7 @@ describe('CLI', () => {
 
     await run(['config:path']);
 
-    expect(stdoutSpy).toHaveBeenCalledWith('/tmp/catraquim/config.json\n');
+    expect(stdoutSpy).toHaveBeenCalledWith(info('/tmp/catraquim/config.json'));
   });
 
   it('passes --force to config:init', async () => {
@@ -58,7 +61,7 @@ describe('CLI', () => {
 
     expect(initConfigMock).toHaveBeenCalledWith({ force: true });
     expect(stdoutSpy).toHaveBeenCalledWith(
-      'Overwrote config file at /tmp/catraquim/config.json\n'
+      ok('Overwrote config file at /tmp/catraquim/config.json')
     );
   });
 
@@ -71,7 +74,7 @@ describe('CLI', () => {
     await run(['config:validate']);
 
     expect(stdoutSpy).toHaveBeenCalledWith(
-      'Config is valid: /tmp/catraquim/config.json\n'
+      ok('Config is valid: /tmp/catraquim/config.json')
     );
   });
 
@@ -84,7 +87,7 @@ describe('CLI', () => {
     await run(['config:edit']);
 
     expect(stdoutSpy).toHaveBeenCalledWith(
-      'Created config file at /tmp/catraquim/config.json\n'
+      ok('Created config file at /tmp/catraquim/config.json')
     );
   });
 
@@ -98,7 +101,7 @@ describe('CLI', () => {
     await run(['config:setup']);
 
     expect(stdoutSpy).toHaveBeenCalledWith(
-      'Updated config file at /tmp/catraquim/config.json\n'
+      ok('Updated config file at /tmp/catraquim/config.json')
     );
   });
 
@@ -111,7 +114,7 @@ describe('CLI', () => {
 
     await run(['config:setup']);
 
-    expect(stdoutSpy).toHaveBeenCalledWith('Config setup cancelled\n');
+    expect(stdoutSpy).toHaveBeenCalledWith(info('Config setup cancelled'));
   });
 
   it('prints auth status for the configured adapters', async () => {

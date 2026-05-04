@@ -1,6 +1,6 @@
 import type { AppConfig } from './schema.js';
 
-export const defaultConfig: AppConfig = {
+export const defaultConfig = {
   models: {
     'claude-opus': {
       adapter: 'claude-code',
@@ -36,4 +36,4 @@ export const defaultConfig: AppConfig = {
     port: 4141,
     token: null,
   },
-};
+} satisfies AppConfig;

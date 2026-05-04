@@ -9,23 +9,31 @@ import {
 } from '../config/manage.js';
 import { AppError } from '../errors.js';
 import { createServerContext, startServer } from '../server.js';
+import { printBanner } from './banner.js';
+import { bold, cyan, dim, green } from './colors.js';
 
-const usage = `catraquim <command>
-
-Commands:
-  start         Start the local HTTP gateway
-  auth:status   Print auth status for configured adapters
-  config:init   Create ~/.config/catraquim/config.json
-  config:setup  Open an interactive config wizard
-  config:path   Print the config file path
-  config:validate
-                Validate the config file against the schema
-  config:edit   Open the config file in $EDITOR
-`;
+const usage = () =>
+  [
+    `${bold('catraquim')} ${dim('<command>')}`,
+    '',
+    bold('Commands:'),
+    `  ${cyan('start')}            Start the local HTTP gateway`,
+    `  ${cyan('auth:status')}      Print auth status for configured adapters`,
+    `  ${cyan('config:init')}      Create ~/.config/catraquim/config.json`,
+    `  ${cyan('config:setup')}     Open an interactive config wizard`,
+    `  ${cyan('config:path')}      Print the config file path`,
+    `  ${cyan('config:validate')}  Validate the config file against the schema`,
+    `  ${cyan('config:edit')}      Open the config file in $EDITOR`,
+    '',
+  ].join('\n');
 
 const printUsage = () => {
-  process.stdout.write(usage);
+  printBanner();
+  process.stdout.write(usage());
 };
+
+const ok = (msg: string) => process.stdout.write(`${green('✓')} ${msg}\n`);
+const info = (msg: string) => process.stdout.write(`${dim('→')} ${msg}\n`);
 
 const parseConfigInitArgs = (args: string[]) => {
   const parsed = parseArgs({
@@ -77,6 +85,7 @@ export const run = async (argv = process.argv.slice(2)) => {
   switch (command) {
     case 'start': {
       ensureNoArgs(command, args);
+      printBanner();
       startServer();
       return;
     }
@@ -90,37 +99,37 @@ export const run = async (argv = process.argv.slice(2)) => {
       const { force } = parseConfigInitArgs(args);
       const result = initConfig({ force });
       const verb = result.created ? 'Created' : 'Overwrote';
-      process.stdout.write(`${verb} config file at ${result.filePath}\n`);
+      ok(`${verb} config file at ${result.filePath}`);
       return;
     }
     case 'config:path': {
       ensureNoArgs(command, args);
-      process.stdout.write(`${getConfigPath()}\n`);
+      info(getConfigPath());
       return;
     }
     case 'config:setup': {
       ensureNoArgs(command, args);
       const result = await setupConfig();
       if (result.cancelled) {
-        process.stdout.write('Config setup cancelled\n');
+        info('Config setup cancelled');
         return;
       }
 
       const verb = result.created ? 'Created' : 'Updated';
-      process.stdout.write(`${verb} config file at ${result.filePath}\n`);
+      ok(`${verb} config file at ${result.filePath}`);
       return;
     }
     case 'config:validate': {
       ensureNoArgs(command, args);
       const result = validateConfig();
-      process.stdout.write(`Config is valid: ${result.filePath}\n`);
+      ok(`Config is valid: ${result.filePath}`);
       return;
     }
     case 'config:edit': {
       ensureNoArgs(command, args);
       const result = editConfig();
       if (result.created) {
-        process.stdout.write(`Created config file at ${result.filePath}\n`);
+        ok(`Created config file at ${result.filePath}`);
       }
       return;
     }

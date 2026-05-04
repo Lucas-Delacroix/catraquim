@@ -101,6 +101,22 @@ const contentPartSchema = z.discriminatedUnion('type', [
   imageContentPartSchema,
 ]);
 
+const responseInputTextPartSchema = z.object({
+  type: z.literal('input_text'),
+  text: z.string(),
+});
+
+const responseInputMessageSchema = z.object({
+  content: z.union([z.string(), z.array(responseInputTextPartSchema).min(1)]),
+  role: z.enum(['system', 'developer', 'user', 'assistant']),
+  type: z.literal('message').optional(),
+});
+
+const responseInputSchema = z.union([
+  z.string(),
+  z.array(responseInputMessageSchema).min(1),
+]);
+
 export const chatMessageSchema = z
   .object({
     content: z
@@ -171,6 +187,65 @@ export const chatCompletionResponseSchema = z
     usage: usageSchema.optional(),
   })
   .openapi('ChatCompletionResponse');
+
+export const responseCreateRequestSchema = z
+  .object({
+    frequency_penalty: z.number().min(-2).max(2).optional(),
+    input: responseInputSchema,
+    instructions: z.string().optional(),
+    max_output_tokens: positiveInt.optional(),
+    model: nonEmptyString,
+    presence_penalty: z.number().min(-2).max(2).optional(),
+    reasoning: z
+      .object({
+        effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
+      })
+      .optional(),
+    stream: z.boolean().default(false),
+    stop: stopSchema,
+    temperature: z.number().min(0).max(2).optional(),
+    text: z.object({ format: responseFormatSchema.optional() }).optional(),
+    top_p: z.number().min(0).max(1).optional(),
+    user: z.string().optional(),
+  })
+  .openapi('ResponseCreateRequest');
+export type ResponseCreateRequestInput = z.infer<
+  typeof responseCreateRequestSchema
+>;
+
+const responseOutputTextSchema = z.object({
+  annotations: z.array(z.unknown()),
+  text: z.string(),
+  type: z.literal('output_text'),
+});
+
+const responseOutputMessageSchema = z.object({
+  id: z.string(),
+  type: z.literal('message'),
+  status: z.literal('completed'),
+  role: z.literal('assistant'),
+  content: z.array(responseOutputTextSchema),
+});
+
+export const responseCreateResponseSchema = z
+  .object({
+    id: z.string(),
+    object: z.literal('response'),
+    created_at: z.number().int(),
+    completed_at: z.number().int(),
+    status: z.literal('completed'),
+    model: z.string(),
+    output: z.array(responseOutputMessageSchema),
+    output_text: z.string(),
+    usage: z
+      .object({
+        input_tokens: z.number().int().nonnegative().optional(),
+        output_tokens: z.number().int().nonnegative().optional(),
+        total_tokens: z.number().int().nonnegative().optional(),
+      })
+      .optional(),
+  })
+  .openapi('ResponseCreateResponse');
 
 export const modelEntrySchema = z
   .object({

@@ -6,7 +6,11 @@ import 'dotenv/config';
 import { defaultConfig } from './defaults.js';
 import { expandHome } from './path-utils.js';
 import { findFirstProviderByType } from './providers.js';
-import { type AppConfig, appConfigSchema } from './schema.js';
+import {
+  type AppConfig,
+  type ProviderConfig,
+  appConfigSchema,
+} from './schema.js';
 import { mergeConfig, readConfigFile } from './store.js';
 
 const readOptionalEnv = (name: string) => {
@@ -48,7 +52,7 @@ const readExistingConfigFiles = (filePaths: string[]): Partial<AppConfig>[] => {
 };
 
 const mergeUserConfigs = (configs: Partial<AppConfig>[]): AppConfig => {
-  return configs.reduce(
+  return configs.reduce<AppConfig>(
     (mergedConfig, config) => mergeConfig(mergedConfig, config),
     defaultConfig
   );
@@ -62,19 +66,20 @@ const firstEnvValue = (...names: string[]) => {
   return undefined;
 };
 
-const providerBinaryEnvVars: Record<string, string[]> = {
+const providerBinaryEnvVars = {
   'claude-code': ['CATRAQUIM_CLAUDE_CODE_BINARY', 'CATRAQUIM_CLAUDE_BINARY'],
   codex: ['CATRAQUIM_CODEX_BINARY'],
-};
+} satisfies Record<ProviderConfig['type'], string[]>;
+
+const providerBinaryEnvEntries = Object.entries(providerBinaryEnvVars) as Array<
+  [ProviderConfig['type'], string[]]
+>;
 
 const buildProviderOverrides = (config: AppConfig): AppConfig['providers'] => {
   const overrides: AppConfig['providers'] = {};
 
-  for (const [type, envVars] of Object.entries(providerBinaryEnvVars)) {
-    const provider = findFirstProviderByType(
-      config.providers,
-      type as keyof typeof providerBinaryEnvVars
-    );
+  for (const [type, envVars] of providerBinaryEnvEntries) {
+    const provider = findFirstProviderByType(config.providers, type);
     if (!provider) continue;
 
     overrides[provider.id] = {
@@ -91,6 +96,7 @@ const applyEnvOverrides = (config: AppConfig): AppConfig =>
   mergeConfig(config, {
     providers: buildProviderOverrides(config),
     server: {
+      host: config.server.host,
       port: Number(readOptionalEnv('CATRAQUIM_PORT') ?? config.server.port),
       token: readOptionalEnv('CATRAQUIM_TOKEN') ?? config.server.token,
     },

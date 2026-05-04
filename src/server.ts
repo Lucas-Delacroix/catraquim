@@ -6,9 +6,10 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import type { Context, ValidationTargets } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { HTTPException } from 'hono/http-exception';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { ZodError, ZodIssue } from 'zod';
 
-import packageJson from '../package.json';
+import packageJson from '../package.json' with { type: 'json' };
 import type { Adapter } from './adapters/base.js';
 import { ModelRegistry } from './application/model-registry.js';
 import { ProviderFactory } from './application/provider-factory.js';
@@ -23,6 +24,7 @@ import { securityHeaders } from './middleware/security.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import { registerChatRoutes } from './routes/chat.js';
 import { registerModelsRoutes } from './routes/models.js';
+import { registerResponsesRoutes } from './routes/responses.js';
 import { CompleteChatUseCase } from './usecases/complete-chat.js';
 import { GetProviderStatusesUseCase } from './usecases/get-provider-statuses.js';
 import { ListModelsUseCase } from './usecases/list-models.js';
@@ -294,7 +296,10 @@ const registerErrorHandler = (app: OpenAPIHono) => {
     }
 
     const mapped = toErrorResponse(mappedError);
-    return c.json({ error: mapped.error }, mapped.statusCode);
+    return c.json(
+      { error: mapped.error },
+      mapped.statusCode as ContentfulStatusCode
+    );
   });
 };
 
@@ -306,7 +311,10 @@ const registerNotFoundHandler = (app: OpenAPIHono) => {
       })
     );
 
-    return c.json({ error: mapped.error }, mapped.statusCode);
+    return c.json(
+      { error: mapped.error },
+      mapped.statusCode as ContentfulStatusCode
+    );
   });
 };
 
@@ -332,6 +340,7 @@ export const createApp = (context = createServerContext()) => {
   registerAdminRoutes(app, context.config, context.getProviderStatuses);
   registerModelsRoutes(app, context.listModels);
   registerChatRoutes(app, context.completeChat);
+  registerResponsesRoutes(app, context.completeChat);
   registerApiDocs(app);
   registerNotFoundHandler(app);
   registerErrorHandler(app);

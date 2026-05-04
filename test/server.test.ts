@@ -67,6 +67,7 @@ describe('OpenAPI docs', () => {
     expect(body.info.title).toBe('catraquim');
     expect(body.servers).toEqual([{ url: '/' }]);
     expect(body.paths['/v1/chat/completions']).toBeDefined();
+    expect(body.paths['/v1/responses']).toBeDefined();
   });
 
   it('serves Swagger UI', async () => {
@@ -238,6 +239,113 @@ describe('OpenAPI docs', () => {
     expect(secondBody.id).toMatch(/^chatcmpl_/);
     expect(firstBody.id).not.toBe('chatcmpl_stub');
     expect(secondBody.id).not.toBe(firstBody.id);
+  });
+
+  it('accepts Responses API string input and maps it to chat execution', async () => {
+    const context = createServerContext(defaultConfig);
+    const executeSpy = vi
+      .spyOn(context.completeChat, 'execute')
+      .mockResolvedValue({
+        canonicalModel: 'codex/gpt-5.4',
+        content: 'Docker empacota aplicações em contêineres portáveis.',
+        finishReason: 'stop',
+        providerId: 'codex',
+        requestedModel: 'codex-max',
+        usage: {
+          completionTokens: 9,
+          promptTokens: 12,
+          totalTokens: 21,
+        },
+      });
+    const app = createApp(context);
+
+    const response = await app.request('/v1/responses', {
+      body: JSON.stringify({
+        input: 'Explique Docker em um parágrafo curto.',
+        instructions: 'Responda em português.',
+        max_output_tokens: 80,
+        model: 'codex-max',
+      }),
+      headers: {
+        'content-type': 'application/json',
+      },
+      method: 'POST',
+    });
+
+    expect(response.status).toBe(200);
+    expect(executeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxTokens: 80,
+        messages: [
+          { content: 'Responda em português.', role: 'system' },
+          {
+            content: 'Explique Docker em um parágrafo curto.',
+            role: 'user',
+          },
+        ],
+        model: 'codex-max',
+        stream: false,
+      }),
+      expect.any(Object)
+    );
+
+    const body = await response.json();
+    expect(body).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^resp_/),
+        object: 'response',
+        status: 'completed',
+        model: 'codex/gpt-5.4',
+        output_text: 'Docker empacota aplicações em contêineres portáveis.',
+        usage: {
+          input_tokens: 12,
+          output_tokens: 9,
+          total_tokens: 21,
+        },
+      })
+    );
+    expect(body.output[0]).toEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^msg_/),
+        type: 'message',
+        role: 'assistant',
+        status: 'completed',
+        content: [
+          {
+            annotations: [],
+            text: 'Docker empacota aplicações em contêineres portáveis.',
+            type: 'output_text',
+          },
+        ],
+      })
+    );
+  });
+
+  it('rejects Responses API streaming until response event streaming is implemented', async () => {
+    const app = createApp(createServerContext(defaultConfig));
+
+    const response = await app.request('/v1/responses', {
+      body: JSON.stringify({
+        input: 'hi',
+        model: 'codex-max',
+        stream: true,
+      }),
+      headers: {
+        'content-type': 'application/json',
+      },
+      method: 'POST',
+    });
+
+    expect(response.status).toBe(501);
+    expect(await response.json()).toEqual({
+      error: {
+        code: 'responses_streaming_unsupported',
+        message:
+          'Responses streaming is not supported yet; send stream=false or use /v1/chat/completions.',
+        transient: false,
+        type: 'compatibility_error',
+      },
+    });
   });
 
   it('maps OpenAI tool_call_id message fields to the internal chat request', async () => {

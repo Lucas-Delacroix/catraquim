@@ -1,4 +1,4 @@
-import type { OpenAPIHono } from '@hono/zod-openapi';
+import { type OpenAPIHono, z } from '@hono/zod-openapi';
 import { streamSSE } from 'hono/streaming';
 
 import {
@@ -20,15 +20,25 @@ import {
   chatCompletionResponseSchema,
 } from './schemas.js';
 
+const chatCompletionJsonResponse = jsonResponse(
+  chatCompletionResponseSchema,
+  'Chat completion.'
+);
+
 const chatCompletionsRoute = createApiRoute({
   method: 'post',
   path: '/v1/chat/completions',
   request: jsonRequestBody(chatCompletionRequestSchema),
   responses: {
-    200: jsonResponse(
-      chatCompletionResponseSchema,
-      'Non-streaming chat completion.'
-    ),
+    200: {
+      ...chatCompletionJsonResponse,
+      content: {
+        ...chatCompletionJsonResponse.content,
+        'text/event-stream': {
+          schema: z.string(),
+        },
+      },
+    },
     ...jsonErrorResponses([400, 401, 404, 413, 500, 501, 502, 504]),
   },
   tag: 'Chat',

@@ -1,4 +1,5 @@
-import { type RouteConfig, type ZodType, createRoute } from '@hono/zod-openapi';
+import { type RouteConfig, createRoute } from '@hono/zod-openapi';
+import type { ZodType } from 'zod';
 
 import { errorResponseSchema } from './schemas.js';
 
@@ -20,12 +21,11 @@ type ApiRouteConfig<P extends string> = Omit<RouteConfig, 'path' | 'tags'> & {
   path: P;
   tag: string;
 };
-export type CreatedApiRoute<P extends string> = RouteConfig & {
-  path: P;
-  tags: [string];
-};
 
-export const jsonRequestBody = (schema: ZodType, required = true) => ({
+export const jsonRequestBody = <TSchema extends ZodType>(
+  schema: TSchema,
+  required = true
+) => ({
   body: {
     content: {
       [APPLICATION_JSON]: {
@@ -36,7 +36,10 @@ export const jsonRequestBody = (schema: ZodType, required = true) => ({
   },
 });
 
-export const jsonResponse = (schema: ZodType, description: string) => ({
+export const jsonResponse = <TSchema extends ZodType>(
+  schema: TSchema,
+  description: string
+) => ({
   content: {
     [APPLICATION_JSON]: {
       schema,
@@ -56,12 +59,15 @@ export const jsonErrorResponses = (
   ) as RouteConfig['responses'];
 };
 
-export const createApiRoute = <P extends string>({
+export const createApiRoute = <
+  const P extends string,
+  const TRoute extends ApiRouteConfig<P>,
+>({
   tag,
   ...routeConfig
-}: ApiRouteConfig<P>): CreatedApiRoute<P> => {
+}: TRoute) => {
   return createRoute({
     ...routeConfig,
     tags: [tag],
-  }) as CreatedApiRoute<P>;
+  });
 };

@@ -107,10 +107,11 @@ export const defineProviderContract = (
       });
     });
 
-    if (options.createFailureAdapter) {
+    const createFailureAdapter = options.createFailureAdapter;
+    if (createFailureAdapter) {
       it('classifies provider failures with canonical metadata', async () => {
         const useCase = new CompleteChatUseCase(createRegistry(), [
-          options.createFailureAdapter(),
+          createFailureAdapter(),
         ]);
 
         await expect(

@@ -6,12 +6,10 @@ import { modelKey, parseModelRef } from '../src/application/model-ref.js';
 import { ProviderFactory } from '../src/application/provider-factory.js';
 import { ProviderModelCatalog } from '../src/application/provider-model-catalog.js';
 import {
-  defaultCodexProvider,
   findFirstProviderByType,
   providerEntries,
 } from '../src/config/providers.js';
 import type { AppConfig } from '../src/config/schema.js';
-import { AppError } from '../src/errors.js';
 
 describe('model refs', () => {
   it('builds and parses provider/model references', () => {
@@ -52,17 +50,6 @@ describe('provider config helpers', () => {
 
     expect(findFirstProviderByType(providers, 'codex')).toEqual({
       config: providers.codex,
-      id: 'codex',
-    });
-  });
-
-  it('returns a default Codex provider config', () => {
-    expect(defaultCodexProvider()).toEqual({
-      config: {
-        binary: 'codex',
-        homePath: '~/.codex',
-        type: 'codex',
-      },
       id: 'codex',
     });
   });
@@ -124,25 +111,5 @@ describe('ProviderFactory', () => {
     expect(adapters[0]?.id).toBe('claude');
     expect(adapters[1]).toBeInstanceOf(CodexAdapter);
     expect(adapters[1]?.id).toBe('codex');
-  });
-
-  it('throws a configuration error for unsupported provider types', () => {
-    expect(() =>
-      new ProviderFactory().create({
-        models: {},
-        providers: {
-          custom: {
-            binary: 'custom',
-            homePath: '~/.custom',
-            type: 'custom',
-          } as AppConfig['providers'][string],
-        },
-        server: {
-          host: '127.0.0.1',
-          port: 4141,
-          token: null,
-        },
-      })
-    ).toThrow(AppError);
   });
 });

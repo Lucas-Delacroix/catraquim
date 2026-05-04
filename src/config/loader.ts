@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import 'dotenv/config';
 
 import { defaultConfig } from './defaults.js';
+import { expandHome } from './path-utils.js';
 import { findFirstProviderByType } from './providers.js';
 import { type AppConfig, appConfigSchema } from './schema.js';
-import { expandHome, mergeConfig, readConfigFile } from './store.js';
+import { mergeConfig, readConfigFile } from './store.js';
 
 const readOptionalEnv = (name: string) => {
   const value = process.env[name];

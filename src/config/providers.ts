@@ -1,4 +1,4 @@
-import type { CodexProviderConfig, ProviderConfig } from './schema.js';
+import type { ProviderConfig } from './schema.js';
 
 export interface ProviderEntry<
   TConfig extends ProviderConfig = ProviderConfig,
@@ -19,12 +19,3 @@ export const findFirstProviderByType = <TType extends ProviderConfig['type']>(
       entry.config.type === type
   );
 };
-
-export const defaultCodexProvider = (): ProviderEntry<CodexProviderConfig> => ({
-  config: {
-    type: 'codex',
-    binary: 'codex',
-    homePath: '~/.codex',
-  },
-  id: 'codex',
-});

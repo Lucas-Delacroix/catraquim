@@ -6,7 +6,7 @@ import type {
   Usage,
 } from '../adapters/base.js';
 import type { ModelRegistry } from '../application/model-registry.js';
-import { AppError } from '../errors.js';
+import { AppError, messageFromUnknownError } from '../errors.js';
 import { logger } from '../logger.js';
 
 export interface ChatCompletionResult {
@@ -114,15 +114,15 @@ export class CompleteChatUseCase {
       return AppError.enrich(error, metadata);
     }
 
-    const message =
-      error instanceof Error && error.message
-        ? error.message
-        : 'Provider request failed';
-
-    return AppError.provider(message, 502, error, {
-      ...metadata,
-      code: 'provider_request_failed',
-    });
+    return AppError.provider(
+      messageFromUnknownError(error, 'Provider request failed'),
+      502,
+      error,
+      {
+        ...metadata,
+        code: 'provider_request_failed',
+      }
+    );
   }
 
   private async *streamCompletion(

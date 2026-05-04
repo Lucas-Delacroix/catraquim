@@ -14,9 +14,11 @@ const baseRequest: ResolvedChatRequest = {
 };
 
 describe('parseClaudeCodeOutput', () => {
-  it('ignores invalid JSON lines and reads alternate result/session fields', () => {
+  const parseRecord = (record: Record<string, unknown>) =>
+    parseClaudeCodeOutput(JSON.stringify(record));
+
+  it('ignores invalid JSON lines and reads alternate result fields', () => {
     const output = parseClaudeCodeOutput(`not-json
-      ${JSON.stringify({ conversationId: ' convo-1 ' })}
       ${JSON.stringify({
         result: ' final answer ',
         usage: {
@@ -28,7 +30,6 @@ describe('parseClaudeCodeOutput', () => {
     `);
 
     expect(output).toEqual({
-      sessionId: 'convo-1',
       text: 'final answer',
       usage: {
         completionTokens: 4,
@@ -40,25 +41,63 @@ describe('parseClaudeCodeOutput', () => {
 
   it('throws nested Claude Code error messages when no text was produced', () => {
     expect(() =>
-      parseClaudeCodeOutput(
-        JSON.stringify({
-          error: {
-            message: 'model unavailable',
-          },
-        })
-      )
+      parseRecord({
+        error: {
+          message: 'model unavailable',
+        },
+      })
     ).toThrow('model unavailable');
   });
 
+  it('throws string Claude Code errors when no text was produced', () => {
+    expect(() => parseRecord({ error: 'permission denied' })).toThrow(
+      'permission denied'
+    );
+  });
+
   it('stringifies unstructured error events when no message is present', () => {
-    expect(() =>
-      parseClaudeCodeOutput(JSON.stringify({ code: 123, type: 'error' }))
-    ).toThrow('{"code":123,"type":"error"}');
+    expect(() => parseRecord({ code: 123, type: 'error' })).toThrow(
+      '{"code":123,"type":"error"}'
+    );
+  });
+
+  it('infers total tokens from positive input and output counts', () => {
+    expect(
+      parseRecord({
+        result: 'done',
+        usage: {
+          input_tokens: 3,
+          output_tokens: 4,
+        },
+      })
+    ).toEqual({
+      text: 'done',
+      usage: {
+        completionTokens: 4,
+        promptTokens: 3,
+        totalTokens: 7,
+      },
+    });
+  });
+
+  it('ignores usage records without positive token counts', () => {
+    expect(
+      parseRecord({
+        result: 'done',
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          total_tokens: 0,
+        },
+      })
+    ).toEqual({
+      text: 'done',
+      usage: undefined,
+    });
   });
 
   it('returns empty text when there are no parseable result records', () => {
     expect(parseClaudeCodeOutput('[]\n42\n')).toEqual({
-      sessionId: undefined,
       text: '',
       usage: undefined,
     });
@@ -83,6 +122,16 @@ describe('toClaudeCodeRunArgs', () => {
 
     expect(result.prompt).toBe('user: hello');
     expect(result.args).not.toContain('--append-system-prompt');
+  });
+
+  it('passes Claude model families as shorthand aliases', () => {
+    const result = toClaudeCodeRunArgs({
+      ...baseRequest,
+      upstreamModel: 'claude-opus-5-0',
+    });
+
+    expect(result.args).toContain('opus');
+    expect(result.args).not.toContain('claude-opus-5-0');
   });
 
   it('preserves image URL content parts as readable prompt text', () => {

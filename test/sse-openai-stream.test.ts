@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  createNotImplementedStreamPayload,
   generateChatCompletionId,
   toOpenAiChatCompletion,
   toOpenAiStreamChunk,
@@ -118,39 +117,5 @@ describe('OpenAI stream response helpers', () => {
     });
 
     vi.useRealTimers();
-  });
-
-  it('includes provider metadata in not-implemented stream payloads when a binding is known', () => {
-    expect(
-      createNotImplementedStreamPayload('codex-max', {
-        canonicalModel: 'codex/gpt-5.4',
-        providerConfig: {
-          binary: 'codex',
-          homePath: '~/.codex',
-          type: 'codex',
-        },
-        providerId: 'codex',
-        requestedModel: 'codex-max',
-        upstreamModel: 'gpt-5.4',
-      })
-    ).toEqual({
-      error: {
-        canonical_model: 'codex/gpt-5.4',
-        message: 'Streaming is not implemented yet for model "codex-max"',
-        provider: 'codex',
-        requested_model: 'codex-max',
-        type: 'not_implemented',
-      },
-    });
-  });
-
-  it('keeps not-implemented stream payloads minimal without a model binding', () => {
-    expect(createNotImplementedStreamPayload('unknown')).toEqual({
-      error: {
-        message: 'Streaming is not implemented yet for model "unknown"',
-        requested_model: 'unknown',
-        type: 'not_implemented',
-      },
-    });
   });
 });

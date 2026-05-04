@@ -22,8 +22,17 @@ interface ProviderState {
 
 const DEFAULT_REFRESH_TTL_MS = 5 * 60 * 1000;
 
+const catalogEntriesFor = (
+  providerId: string,
+  providerState: ProviderState
+): ProviderCatalogEntry[] =>
+  Array.from(providerState.modelIds, (modelId) => ({
+    canonicalRef: modelKey(providerId, modelId),
+    modelId,
+    providerId,
+  }));
+
 export class ProviderModelCatalog {
-  private readonly providers: AppConfig['providers'];
   private readonly state = new Map<string, ProviderState>();
   private readonly refreshTtlMs: number;
 
@@ -31,7 +40,6 @@ export class ProviderModelCatalog {
     providers: AppConfig['providers'],
     options: ProviderModelCatalogOptions = {}
   ) {
-    this.providers = providers;
     this.refreshTtlMs = options.refreshTtlMs ?? DEFAULT_REFRESH_TTL_MS;
 
     for (const [providerId, provider] of Object.entries(providers)) {
@@ -44,28 +52,14 @@ export class ProviderModelCatalog {
   }
 
   public list(): ProviderCatalogEntry[] {
-    const entries: ProviderCatalogEntry[] = [];
-    for (const [providerId, providerState] of this.state) {
-      for (const modelId of providerState.modelIds) {
-        entries.push({
-          canonicalRef: modelKey(providerId, modelId),
-          modelId,
-          providerId,
-        });
-      }
-    }
-    return entries;
+    return Array.from(this.state).flatMap(([providerId, providerState]) =>
+      catalogEntriesFor(providerId, providerState)
+    );
   }
 
   public listForProvider(providerId: string): ProviderCatalogEntry[] {
     const providerState = this.state.get(providerId);
-    if (!providerState) return [];
-
-    return Array.from(providerState.modelIds, (modelId) => ({
-      canonicalRef: modelKey(providerId, modelId),
-      modelId,
-      providerId,
-    }));
+    return providerState ? catalogEntriesFor(providerId, providerState) : [];
   }
 
   public has(providerId: string, modelId: string): boolean {

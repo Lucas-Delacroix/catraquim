@@ -1,4 +1,4 @@
-import { expandHome } from '../../config/store.js';
+import { expandHome } from '../../config/path-utils.js';
 
 export const CLAUDE_CODE_CLEAR_ENV = [
   'ANTHROPIC_API_KEY',

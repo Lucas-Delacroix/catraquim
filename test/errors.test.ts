@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { AppError, toErrorResponse } from '../src/errors.js';
+import {
+  AppError,
+  messageFromUnknownError,
+  toErrorResponse,
+} from '../src/errors.js';
 
 describe('AppError', () => {
   it.each([
@@ -107,5 +111,13 @@ describe('toErrorResponse', () => {
       },
       statusCode: 500,
     });
+  });
+});
+
+describe('messageFromUnknownError', () => {
+  it('uses concrete Error messages and falls back for empty or non-Error values', () => {
+    expect(messageFromUnknownError(new Error('boom'), 'fallback')).toBe('boom');
+    expect(messageFromUnknownError(new Error(''), 'fallback')).toBe('fallback');
+    expect(messageFromUnknownError('boom', 'fallback')).toBe('fallback');
   });
 });

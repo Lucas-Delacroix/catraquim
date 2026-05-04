@@ -102,6 +102,7 @@ describe('ProviderModelCatalog (dynamic discovery)', () => {
     const catalog = new ProviderModelCatalog(providers, { refreshTtlMs: 50 });
 
     expect(catalog.isStale('claude')).toBe(true);
+    expect(catalog.isStale('unknown')).toBe(false);
 
     const adapter = makeAdapter('claude', async () => ['opus']);
     await catalog.refresh([adapter]);

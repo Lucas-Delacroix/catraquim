@@ -1,7 +1,6 @@
 import type { Usage } from '../base.js';
 
 export interface ClaudeCodeOutput {
-  sessionId?: string;
   text: string;
   usage?: Usage;
 }
@@ -18,6 +17,10 @@ const pickPositiveNumber = (
   return typeof value === 'number' && value > 0 ? value : undefined;
 };
 
+const pickNonEmptyString = (value: unknown): string | undefined => {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+};
+
 const readUsage = (record: Record<string, unknown>): Usage | undefined => {
   if (!isRecord(record.usage)) {
     return undefined;
@@ -25,13 +28,14 @@ const readUsage = (record: Record<string, unknown>): Usage | undefined => {
 
   const promptTokens = pickPositiveNumber(record.usage, 'input_tokens');
   const completionTokens = pickPositiveNumber(record.usage, 'output_tokens');
+  const inferredTotalTokens =
+    promptTokens === undefined && completionTokens === undefined
+      ? undefined
+      : (promptTokens ?? 0) + (completionTokens ?? 0);
   const totalTokens =
-    pickPositiveNumber(record.usage, 'total_tokens') ??
-    (promptTokens || completionTokens
-      ? (promptTokens ?? 0) + (completionTokens ?? 0)
-      : undefined);
+    pickPositiveNumber(record.usage, 'total_tokens') ?? inferredTotalTokens;
 
-  if (!promptTokens && !completionTokens && !totalTokens) {
+  if (totalTokens === undefined) {
     return undefined;
   }
 
@@ -42,22 +46,6 @@ const readUsage = (record: Record<string, unknown>): Usage | undefined => {
   };
 };
 
-const pickSessionId = (record: Record<string, unknown>) => {
-  for (const field of [
-    'session_id',
-    'sessionId',
-    'conversation_id',
-    'conversationId',
-  ]) {
-    const value = record[field];
-    if (typeof value === 'string' && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  return undefined;
-};
-
 const readErrorMessage = (
   record: Record<string, unknown>
 ): string | undefined => {
@@ -65,19 +53,11 @@ const readErrorMessage = (
     return readErrorMessage(record.error);
   }
 
-  if (typeof record.message === 'string' && record.message.trim()) {
-    return record.message.trim();
-  }
-
-  if (typeof record.error === 'string' && record.error.trim()) {
-    return record.error.trim();
-  }
-
-  if (record.type === 'error') {
-    return JSON.stringify(record);
-  }
-
-  return undefined;
+  return (
+    pickNonEmptyString(record.message) ??
+    pickNonEmptyString(record.error) ??
+    (record.type === 'error' ? JSON.stringify(record) : undefined)
+  );
 };
 
 export const parseClaudeCodeOutput = (raw: string): ClaudeCodeOutput => {
@@ -85,7 +65,6 @@ export const parseClaudeCodeOutput = (raw: string): ClaudeCodeOutput => {
     .split(/\r?\n/g)
     .map((line) => line.trim())
     .filter(Boolean);
-  let sessionId: string | undefined;
   let usage: Usage | undefined;
   let text = '';
   let errorMessage: string | undefined;
@@ -102,7 +81,6 @@ export const parseClaudeCodeOutput = (raw: string): ClaudeCodeOutput => {
       continue;
     }
 
-    sessionId = pickSessionId(parsed) ?? sessionId;
     usage = readUsage(parsed) ?? usage;
     errorMessage = readErrorMessage(parsed) ?? errorMessage;
 
@@ -121,7 +99,6 @@ export const parseClaudeCodeOutput = (raw: string): ClaudeCodeOutput => {
   }
 
   return {
-    sessionId,
     text,
     usage,
   };

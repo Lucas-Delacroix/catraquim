@@ -26,15 +26,11 @@ export const STATIC_CLAUDE_CODE_MODEL_IDS = [
 
 type ProviderType = AppConfig['providers'][string]['type'];
 
+const STATIC_MODEL_IDS_BY_PROVIDER_TYPE = {
+  'claude-code': STATIC_CLAUDE_CODE_MODEL_IDS,
+  codex: STATIC_CODEX_MODEL_IDS,
+} satisfies Record<ProviderType, readonly string[]>;
+
 export const staticModelIdsForProviderType = (
   type: ProviderType
-): readonly string[] => {
-  switch (type) {
-    case 'claude-code':
-      return STATIC_CLAUDE_CODE_MODEL_IDS;
-    case 'codex':
-      return STATIC_CODEX_MODEL_IDS;
-    default:
-      return [];
-  }
-};
+): readonly string[] => STATIC_MODEL_IDS_BY_PROVIDER_TYPE[type];

@@ -99,25 +99,17 @@ export class RotatingLogStream extends Writable {
   }
 }
 
-const parsePositiveInteger = (value: string | undefined, fallback: number) => {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  const parsed = Number.parseInt(value, 10);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-};
-
-const parseNonNegativeInteger = (
+const parseIntegerEnv = (
   value: string | undefined,
-  fallback: number
+  fallback: number,
+  minimum: number
 ) => {
   if (value === undefined) {
     return fallback;
   }
 
   const parsed = Number.parseInt(value, 10);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+  return Number.isInteger(parsed) && parsed >= minimum ? parsed : fallback;
 };
 
 const defaultProductionLogFile = (env: LoggerEnvironment) => {
@@ -128,13 +120,15 @@ const defaultProductionLogFile = (env: LoggerEnvironment) => {
 const createProductionLogStream = (env: LoggerEnvironment) =>
   new RotatingLogStream({
     filePath: env.CATRAQUIM_LOG_FILE ?? defaultProductionLogFile(env),
-    maxBytes: parsePositiveInteger(
+    maxBytes: parseIntegerEnv(
       env.CATRAQUIM_LOG_MAX_BYTES,
-      defaultLogMaxBytes
+      defaultLogMaxBytes,
+      1
     ),
-    maxFiles: parseNonNegativeInteger(
+    maxFiles: parseIntegerEnv(
       env.CATRAQUIM_LOG_MAX_FILES,
-      defaultLogMaxFiles
+      defaultLogMaxFiles,
+      0
     ),
   });
 

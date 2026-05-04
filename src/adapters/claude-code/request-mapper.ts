@@ -1,30 +1,15 @@
 import type { ResolvedChatRequest } from '../base.js';
 import { chatContentToText } from '../content.js';
 
-const CLAUDE_MODEL_ALIASES: Record<string, string> = {
-  'claude-haiku-3-5': 'haiku',
-  'claude-haiku-4-5': 'haiku',
-  'claude-opus-4': 'opus',
-  'claude-opus-4-5': 'opus',
-  'claude-opus-4-6': 'opus',
-  'claude-opus-4-7': 'opus',
-  'claude-sonnet-4-0': 'sonnet',
-  'claude-sonnet-4-1': 'sonnet',
-  'claude-sonnet-4-5': 'sonnet',
-  'claude-sonnet-4-6': 'sonnet',
-  'haiku-3.5': 'haiku',
-  'opus-4': 'opus',
-  'opus-4.5': 'opus',
-  'opus-4.6': 'opus',
-  'opus-4.7': 'opus',
-  'sonnet-4.0': 'sonnet',
-  'sonnet-4.1': 'sonnet',
-  'sonnet-4.5': 'sonnet',
-  'sonnet-4.6': 'sonnet',
-};
+const CLAUDE_MODEL_FAMILIES = ['haiku', 'opus', 'sonnet'] as const;
 
 const toClaudeModelArg = (model: string) =>
-  CLAUDE_MODEL_ALIASES[model] ?? model;
+  CLAUDE_MODEL_FAMILIES.find(
+    (family) =>
+      model === family ||
+      model.startsWith(`${family}-`) ||
+      model.startsWith(`claude-${family}-`)
+  ) ?? model;
 
 const splitMessages = (req: ResolvedChatRequest) => {
   const system = req.messages

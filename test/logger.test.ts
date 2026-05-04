@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { RotatingLogStream } from '../src/logger.js';
+import { RotatingLogStream, createLogger } from '../src/logger.js';
 
 const tempDirs: string[] = [];
 
@@ -65,6 +65,25 @@ describe('RotatingLogStream', () => {
     stream.write('next\n');
 
     expect(readFileSync(filePath, 'utf8')).toBe('next\n');
+    expect(existsSync(`${filePath}.1`)).toBe(false);
+  });
+
+  it('uses production env values for the log file and rotation limits', () => {
+    const dir = createTempDir();
+    const filePath = join(dir, 'production.log');
+    const logger = createLogger({
+      CATRAQUIM_LOG_FILE: filePath,
+      CATRAQUIM_LOG_MAX_BYTES: '1',
+      CATRAQUIM_LOG_MAX_FILES: '0',
+      NODE_ENV: 'production',
+    });
+
+    logger.info('first');
+    logger.info('second');
+
+    const written = readFileSync(filePath, 'utf8');
+    expect(written).toContain('"msg":"second"');
+    expect(written).not.toContain('"msg":"first"');
     expect(existsSync(`${filePath}.1`)).toBe(false);
   });
 });

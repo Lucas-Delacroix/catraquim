@@ -2,22 +2,17 @@ import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { expandHome } from '../../config/path-utils.js';
 import { logger } from '../../logger.js';
 
 export const gatewayCodexHome = () =>
   join(homedir(), '.local', 'share', 'catraquim', 'codex-home');
 
-const resolveSource = (source: string): string => {
-  if (source === '~') return homedir();
-  if (source.startsWith('~/')) return join(homedir(), source.slice(2));
-  return source;
-};
-
 export const prepareCodexHome = (sourceHomePath: string): string => {
   const target = gatewayCodexHome();
   mkdirSync(target, { recursive: true });
 
-  const srcAuth = join(resolveSource(sourceHomePath), 'auth.json');
+  const srcAuth = join(expandHome(sourceHomePath), 'auth.json');
   const dstAuth = join(target, 'auth.json');
 
   if (existsSync(srcAuth)) {

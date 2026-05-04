@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { expandHome } from '../config/store.js';
+import { expandHome } from '../config/path-utils.js';
+import { messageFromUnknownError } from '../errors.js';
 import { readMacOsKeychainSecret } from './keychain.js';
 
 export interface ClaudeCodeAuthStatus {
@@ -92,10 +93,10 @@ const readCredentialsFileStatus = (authFile: string): ClaudeCodeAuthStatus => {
   } catch (error) {
     return {
       expiresAt: null,
-      message:
-        error instanceof Error
-          ? error.message
-          : 'Failed to parse Claude Code credentials file',
+      message: messageFromUnknownError(
+        error,
+        'Failed to parse Claude Code credentials file'
+      ),
       ok: false,
     };
   }

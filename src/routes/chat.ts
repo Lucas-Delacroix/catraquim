@@ -86,8 +86,9 @@ export const registerChatRoutes = (
     };
 
     if (body.stream) {
-      const binding = completeChat.resolveModel(body.model);
-      const canonicalModel = binding?.canonicalModel ?? body.model;
+      const canonicalModel = completeChat.resolveModel(
+        body.model
+      ).canonicalModel;
       const id = generateChatCompletionId();
 
       return streamSSE(c, async (stream) => {

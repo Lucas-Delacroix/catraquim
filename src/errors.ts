@@ -164,6 +164,9 @@ export class AppError extends Error {
   }
 }
 
+export const messageFromUnknownError = (error: unknown, fallback: string) =>
+  error instanceof Error && error.message ? error.message : fallback;
+
 export const toErrorResponse = (error: unknown) => {
   if (error instanceof AppError) {
     return {

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
 import type { ChatChunk } from '../adapters/base.js';
-import type { ModelBinding } from '../application/model-registry.js';
 import type { ChatCompletionResult } from '../usecases/complete-chat.js';
 
 const toOpenAiUsage = (usage: ChatCompletionResult['usage']) => {
@@ -36,21 +35,6 @@ export const toOpenAiChatCompletion = (
       },
     ],
     usage: toOpenAiUsage(completion.usage),
-  };
-};
-
-export const createNotImplementedStreamPayload = (
-  requestedModel: string,
-  binding?: ModelBinding
-) => {
-  return {
-    error: {
-      ...(binding ? { canonical_model: binding.canonicalModel } : {}),
-      message: `Streaming is not implemented yet for model "${requestedModel}"`,
-      ...(binding ? { provider: binding.providerId } : {}),
-      requested_model: requestedModel,
-      type: 'not_implemented',
-    },
   };
 };
 

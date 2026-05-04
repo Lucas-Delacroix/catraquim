@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { expandHome } from '../config/store.js';
+import { expandHome } from '../config/path-utils.js';
+import { messageFromUnknownError } from '../errors.js';
 
 export interface CodexAuthStatus {
   expiresAt: string | null;
@@ -41,10 +42,10 @@ export const getCodexAuthStatus = async (
   } catch (error) {
     return {
       expiresAt: null,
-      message:
-        error instanceof Error
-          ? error.message
-          : 'Failed to parse Codex auth file',
+      message: messageFromUnknownError(
+        error,
+        'Failed to parse Codex auth file'
+      ),
       ok: false,
     };
   }

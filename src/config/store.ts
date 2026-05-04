@@ -1,6 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 
 import { modelKey, parseModelRef } from '../application/model-ref.js';
 import { AppError } from '../errors.js';
@@ -127,18 +126,6 @@ const serializeModels = (models: AppConfig['models']) => {
       modelKey(definition.adapter, definition.upstreamModel),
     ])
   );
-};
-
-export const expandHome = (value: string) => {
-  if (value === '~') {
-    return homedir();
-  }
-
-  if (value.startsWith('~/')) {
-    return join(homedir(), value.slice(2));
-  }
-
-  return value;
 };
 
 export const normalizeConfigShape = (raw: Record<string, unknown>) => {

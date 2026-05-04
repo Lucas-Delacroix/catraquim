@@ -125,6 +125,10 @@ describe('config management', () => {
 
   it('writes a config file from interactive answers', async () => {
     const filePath = createTempPath();
+    const confirm = vi
+      .fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true);
 
     const result = await setupConfig({
       filePath,
@@ -139,14 +143,11 @@ describe('config management', () => {
           .mockResolvedValueOnce('codex')
           .mockResolvedValueOnce('~/.codex')
           .mockResolvedValueOnce('gpt-5')
-          .mockResolvedValueOnce('codex/gpt-5.4')
+          .mockResolvedValueOnce('gpt-5.4')
           .mockResolvedValueOnce('gpt-5-mini')
           .mockResolvedValueOnce('codex/gpt-5.4-mini'),
         close: vi.fn(),
-        confirm: vi
-          .fn()
-          .mockResolvedValueOnce(true)
-          .mockResolvedValueOnce(true),
+        confirm,
       },
     });
 
@@ -173,6 +174,76 @@ describe('config management', () => {
         token: 'test-token',
       },
     });
+    expect(confirm).toHaveBeenNthCalledWith(
+      1,
+      'Configure a second model',
+      true
+    );
+    expect(confirm).toHaveBeenNthCalledWith(
+      2,
+      `Write config to ${filePath}`,
+      true
+    );
+  });
+
+  it('rejects malformed canonical model references during setup', async () => {
+    const filePath = createTempPath();
+    const close = vi.fn();
+
+    await expect(
+      setupConfig({
+        filePath,
+        promptApi: {
+          ask: vi
+            .fn()
+            .mockResolvedValueOnce('127.0.0.1')
+            .mockResolvedValueOnce('4141')
+            .mockResolvedValueOnce('')
+            .mockResolvedValueOnce('codex')
+            .mockResolvedValueOnce('codex')
+            .mockResolvedValueOnce('codex')
+            .mockResolvedValueOnce('~/.codex')
+            .mockResolvedValueOnce('codex-max')
+            .mockResolvedValueOnce('codex/'),
+          close,
+          confirm: vi.fn(),
+        },
+      })
+    ).rejects.toThrow(/Invalid canonical model "codex\/"/);
+
+    expect(close).toHaveBeenCalledOnce();
+    expect(() => readFileSync(filePath, 'utf8')).toThrow();
+  });
+
+  it('rejects duplicate model aliases during setup', async () => {
+    const filePath = createTempPath();
+    const close = vi.fn();
+
+    await expect(
+      setupConfig({
+        filePath,
+        promptApi: {
+          ask: vi
+            .fn()
+            .mockResolvedValueOnce('127.0.0.1')
+            .mockResolvedValueOnce('4141')
+            .mockResolvedValueOnce('')
+            .mockResolvedValueOnce('codex')
+            .mockResolvedValueOnce('codex')
+            .mockResolvedValueOnce('codex')
+            .mockResolvedValueOnce('~/.codex')
+            .mockResolvedValueOnce('codex-max')
+            .mockResolvedValueOnce('codex/gpt-5.4')
+            .mockResolvedValueOnce('codex-max')
+            .mockResolvedValueOnce('codex/gpt-5.4-mini'),
+          close,
+          confirm: vi.fn().mockResolvedValueOnce(true),
+        },
+      })
+    ).rejects.toThrow(/Model aliases must be different/);
+
+    expect(close).toHaveBeenCalledOnce();
+    expect(() => readFileSync(filePath, 'utf8')).toThrow();
   });
 
   it('returns cancelled when the interactive setup is aborted at confirmation', async () => {
@@ -405,5 +476,55 @@ describe('config management', () => {
       'Second canonical model',
       'codex/gpt-5.4-mini'
     );
+  });
+
+  it('uses recommended codex defaults when the existing config has no codex provider', async () => {
+    const filePath = createTempPath();
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        providers: {
+          codex: {
+            type: 'claude-code',
+            binary: 'claude',
+            homePath: '~/.claude',
+          },
+        },
+      }),
+      'utf8'
+    );
+
+    const ask = vi
+      .fn()
+      .mockResolvedValueOnce('127.0.0.1')
+      .mockResolvedValueOnce('4141')
+      .mockResolvedValueOnce('')
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValueOnce('codex')
+      .mockResolvedValueOnce('~/.codex')
+      .mockResolvedValueOnce('codex-max')
+      .mockResolvedValueOnce('codex/gpt-5.4');
+
+    await setupConfig({
+      filePath,
+      promptApi: {
+        ask,
+        close: vi.fn(),
+        confirm: vi
+          .fn()
+          .mockResolvedValueOnce(false)
+          .mockResolvedValueOnce(true),
+      },
+    });
+
+    expect(ask).toHaveBeenNthCalledWith(
+      4,
+      'Provider type (codex|claude-code)',
+      'codex'
+    );
+    expect(ask).toHaveBeenNthCalledWith(5, 'Provider id', 'codex');
+    expect(ask).toHaveBeenNthCalledWith(6, 'Codex binary', 'codex');
+    expect(ask).toHaveBeenNthCalledWith(7, 'Codex home', '~/.codex');
   });
 });

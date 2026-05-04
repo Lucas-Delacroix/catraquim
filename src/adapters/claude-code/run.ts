@@ -110,13 +110,8 @@ export const runClaudeCode = (
       }
 
       try {
-        const parsed = parseClaudeCodeOutput(stdout);
-        settle(() =>
-          resolve({
-            text: parsed.text,
-            usage: parsed.usage,
-          })
-        );
+        const result = parseClaudeCodeOutput(stdout);
+        settle(() => resolve(result));
       } catch (error) {
         settle(() =>
           reject(

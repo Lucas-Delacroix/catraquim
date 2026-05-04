@@ -2,10 +2,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 
+import { modelKey, parseModelRef } from '../application/model-ref.js';
 import { AppError } from '../errors.js';
 import { defaultConfig } from './defaults.js';
 import { homeConfigPath } from './loader.js';
-import { defaultCodexProvider, findFirstProviderByType } from './providers.js';
+import { findFirstProviderByType } from './providers.js';
 import {
   type AppConfig,
   type ProviderConfig,
@@ -206,22 +207,19 @@ const parseCanonicalModelInput = (value: string, providerId: string) => {
     throw new AppError('Model reference cannot be empty', 400);
   }
 
-  const slashIndex = trimmed.indexOf('/');
-  if (slashIndex === -1) {
+  const parsed = parseModelRef(trimmed);
+  if (!parsed) {
+    if (trimmed.includes('/')) {
+      throw new AppError(`Invalid canonical model "${value}"`, 400);
+    }
+
     return {
       providerId,
       upstreamModel: trimmed,
     };
   }
 
-  const parsedProviderId = trimmed.slice(0, slashIndex).trim();
-  const upstreamModel = trimmed.slice(slashIndex + 1).trim();
-
-  if (!parsedProviderId || !upstreamModel) {
-    throw new AppError(`Invalid canonical model "${value}"`, 400);
-  }
-
-  if (parsedProviderId !== providerId) {
+  if (parsed.providerId !== providerId) {
     throw new AppError(
       `Canonical model "${value}" must use provider "${providerId}"`,
       400
@@ -229,8 +227,8 @@ const parseCanonicalModelInput = (value: string, providerId: string) => {
   }
 
   return {
-    providerId: parsedProviderId,
-    upstreamModel,
+    providerId: parsed.providerId,
+    upstreamModel: parsed.model,
   };
 };
 
@@ -259,27 +257,22 @@ const buildModelsConfig = (
   primary: PromptedModel,
   secondary?: PromptedModel
 ): AppConfig['models'] => {
-  if (secondary && secondary.alias === primary.alias) {
+  const promptedModels = secondary ? [primary, secondary] : [primary];
+  const aliases = promptedModels.map((model) => model.alias);
+
+  if (new Set(aliases).size !== aliases.length) {
     throw new AppError('Model aliases must be different', 400);
   }
 
-  const models: AppConfig['models'] = {
-    [primary.alias]: {
-      adapter: primary.binding.providerId,
-      upstreamModel: primary.binding.upstreamModel,
-    },
-  };
-
-  if (!secondary) {
-    return models;
-  }
-
-  models[secondary.alias] = {
-    adapter: secondary.binding.providerId,
-    upstreamModel: secondary.binding.upstreamModel,
-  };
-
-  return models;
+  return Object.fromEntries(
+    promptedModels.map(({ alias, binding }) => [
+      alias,
+      {
+        adapter: binding.providerId,
+        upstreamModel: binding.upstreamModel,
+      },
+    ])
+  );
 };
 
 type ModelEntry = [string, AppConfig['models'][string]];
@@ -300,28 +293,16 @@ const fallbackModelAliases = (
     ? ['claude-opus', 'claude-sonnet']
     : ['codex-max', 'codex-mini'];
 
-interface ModelDefaults {
-  hasSecondary: boolean;
-  primary: ModelEntry;
-  secondary: ModelEntry;
-}
-
 const resolveDefaultModelEntries = (
   providerType: ProviderConfig['type']
-): ModelDefaults => {
-  const fallbackAliases = fallbackModelAliases(providerType);
-  const candidates = fallbackAliases.map(fallbackEntry);
-
-  return {
-    hasSecondary: candidates.length > 1,
-    primary: candidates[0] ?? fallbackEntry(fallbackAliases[0]),
-    secondary: candidates[1] ?? fallbackEntry(fallbackAliases[1]),
-  };
+): [ModelEntry, ModelEntry] => {
+  const [primaryAlias, secondaryAlias] = fallbackModelAliases(providerType);
+  return [fallbackEntry(primaryAlias), fallbackEntry(secondaryAlias)];
 };
 
-const defaultProviderForType = (providerType: ProviderConfig['type']) =>
-  findFirstProviderByType(defaultConfig.providers, providerType) ??
-  defaultCodexProvider();
+const defaultProviderForType = (providerType: ProviderConfig['type']) => {
+  return { config: defaultConfig.providers[providerType], id: providerType };
+};
 
 const createPromptApi = (
   input: NodeJS.ReadableStream = process.stdin,
@@ -383,7 +364,7 @@ export const setupConfig = async ({
   const currentConfig = readEffectiveConfig(filePath);
   const currentProvider =
     findFirstProviderByType(currentConfig.providers, 'codex') ??
-    defaultCodexProvider();
+    defaultProviderForType('codex');
   const prompts = promptApi ?? createPromptApi(input, output);
   const created = !existsSync(filePath);
 
@@ -419,11 +400,7 @@ export const setupConfig = async ({
       `${providerName} home`,
       providerDefaults.config.homePath
     );
-    const {
-      primary: firstModel,
-      secondary: secondModel,
-      hasSecondary,
-    } = resolveDefaultModelEntries(providerType);
+    const [firstModel, secondModel] = resolveDefaultModelEntries(providerType);
     const primaryModel = await promptModel(
       prompts,
       {
@@ -432,13 +409,13 @@ export const setupConfig = async ({
       },
       {
         alias: firstModel[0],
-        canonicalModel: `${providerId}/${firstModel[1].upstreamModel}`,
+        canonicalModel: modelKey(providerId, firstModel[1].upstreamModel),
       },
       providerId
     );
     const includeSecondModel = await prompts.confirm(
       'Configure a second model',
-      hasSecondary
+      true
     );
 
     let secondModelInput: PromptedModel | undefined;
@@ -451,7 +428,7 @@ export const setupConfig = async ({
         },
         {
           alias: secondModel[0],
-          canonicalModel: `${providerId}/${secondModel[1].upstreamModel}`,
+          canonicalModel: modelKey(providerId, secondModel[1].upstreamModel),
         },
         providerId
       );

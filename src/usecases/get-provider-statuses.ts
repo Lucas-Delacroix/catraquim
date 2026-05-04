@@ -1,4 +1,5 @@
 import type { Adapter } from '../adapters/base.js';
+import { messageFromUnknownError } from '../errors.js';
 import { logger } from '../logger.js';
 
 export class GetProviderStatusesUseCase {
@@ -9,11 +10,6 @@ export class GetProviderStatusesUseCase {
       const { id: _id, ...status } = await provider.status();
       return [provider.id, status] as const;
     } catch (error) {
-      const message =
-        error instanceof Error && error.message
-          ? error.message
-          : 'Status check failed';
-
       logger.warn(
         { err: error, providerId: provider.id },
         'Provider status check failed'
@@ -22,7 +18,7 @@ export class GetProviderStatusesUseCase {
       return [
         provider.id,
         {
-          message,
+          message: messageFromUnknownError(error, 'Status check failed'),
           ok: false,
         },
       ] as const;

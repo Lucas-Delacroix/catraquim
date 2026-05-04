@@ -1,5 +1,5 @@
 # catraquim
-
+![catraquim](docs/tatu.png)
 <p align="center">
   <strong>Gateway local que expõe Codex e Claude Code como uma API compatível com OpenAI.</strong>
 </p>
